@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head prefix="og: http://ogp.me/ns#">
+    <meta charset="utf-8">
+    <title>Weird TV</title>
+    <meta name="description" content="Channel of weird and bewildering videos.">
+    <meta name="author" content="p0lish">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+    <meta name="referrer" content="origin">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="apple-mobile-web-app-title" content="Weird TV">
+    <meta name="application-name" content="Weird TV">
+    <meta name="msapplication-tooltip" content="Weird TV">
+    <meta name="msapplication-starturl" content="//">
+    <meta name="msapplication-TileColor" content="#000">
+    <meta name="msapplication-navbutton-color" content="#000">
+    <meta name="theme-color" content="#000">
+    <meta property="fb:app_id" content="1447159208631231">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="//">
+    <meta property="og:site_name" content="Weird TV">
+    <meta property="og:title" content="Neave.TV - Television without context">
+    <meta property="og:description" content="Channel of weird and bewildering videos.">
+    <link rel="stylesheet" href="{{ url_for('static', filename='tv.css') }}">
+</head>
+
+<body>
+    <canvas class="tv"></canvas>
+    <div class="scanlines"></div>
+    <div class="autoplay"></div>
+    <script src="{{ url_for('static', filename='image.js') }}"></script>
+    <script src="{{ url_for('static', filename='tv.js') }}"></script>
+</body>
+
+</html>

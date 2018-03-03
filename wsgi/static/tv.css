@@ -1,0 +1,141 @@
+* {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    font-size: 100%;
+    vertical-align: baseline;
+    background: transparent
+}
+
+article,
+aside,
+footer,
+header,
+nav,
+section {
+    display: block
+}
+
+html,
+body {
+    height: 100%
+}
+
+body {
+    font: 18px sans-serif;
+    line-height: 1.4;
+    color: #fff;
+    overflow: hidden;
+    background-color: #000;
+    width: 100%;
+    height: 100%;
+    -webkit-text-size-adjust: none;
+    -ms-text-size-adjust: none;
+    text-size-adjust: none
+}
+
+a {
+    margin: 0;
+    padding: 0;
+    font-size: 100%;
+    vertical-align: baseline;
+    text-decoration: none;
+    color: #fff;
+    background-color: transparent
+}
+
+a:hover,
+a:active,
+a:focus {
+    outline: 0
+}
+
+a:active {
+    color: #999
+}
+
+a:link {
+    -webkit-tap-highlight-color: transparent;
+    tap-highlight-color: transparent
+}
+
+.tv {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+    cursor: pointer;
+    background-image: url(testcard.png);
+    -webkit-background-size: 100% 100%;
+    -moz-background-size: 100% 100%;
+    background-size: 100% 100%;
+    -webkit-tap-highlight-color: transparent;
+    tap-highlight-color: transparent
+}
+
+.scanlines {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none;
+    background-image: -webkit-radial-gradient( center, ellipse cover, transparent 0, transparent 60%, rgba(0, 0, 0, .25) 100%), -webkit-repeating-linear-gradient( top, transparent 0, transparent 1px, rgba(0, 0, 0, .25) 3px);
+    background-image: -moz-radial-gradient( center, ellipse cover, transparent 0, transparent 60%, rgba(0, 0, 0, .25) 100%), -moz-repeating-linear-gradient( top, transparent 0, transparent 1px, rgba(0, 0, 0, .25) 3px);
+    background-image: radial-gradient( ellipse at center, transparent 0, transparent 60%, rgba(0, 0, 0, .25) 100%), repeating-linear-gradient( 0, transparent 0, transparent 1px, rgba(0, 0, 0, .25) 3px);
+    -webkit-background-size: 100% 100%, 100% 6px;
+    -moz-background-size: 100% 100%, 100% 6px;
+    background-size: 100% 100%, 100% 6px
+}
+
+.autoplay {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+    cursor: pointer;
+    background-image: url(play.svg);
+    background-size: 20%;
+    background-position: 50% 50%;
+    background-repeat: no-repeat
+}
+
+.alt {
+    display: none;
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    top: 50%;
+    margin-top: -50px;
+    color: #222;
+    background-color: #fff;
+    padding: 20px 0
+}
+
+.disabled .alt {
+    pointer-events: none
+}
+
+.alt a {
+    color: #222;
+    text-decoration: underline
+}
