@@ -6,5 +6,5 @@ setup(name='Weird.TV',
       author='Polish',
       author_email='polish1987@gmail.com',
       url='https://www.python.org/community/sigs/current/distutils-sig',
-      install_requires=['Flask>=0.12.2', 'requests'],
+      install_requires=['Flask', 'requests'],
       )
