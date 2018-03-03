@@ -7,9 +7,7 @@ USERAGENTS = [
     "Mozilla/5.0 (Windows; U; Windows NT 6.1; rv:2.2) Gecko/20110201"
 ]
 
-
 app = Flask(__name__)
-app.hos
 
 
 @app.route('/')
