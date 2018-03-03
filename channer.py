@@ -39,12 +39,12 @@ class Channer:
 
     def _get_thread_elements(self, thread):
         current_url = "/".join((self.API_URL, thread, "catalog.json"))
-        content = json.loads(self._get_content(current_url))
+        content = json.loads(self._get_content(current_url).decode('utf-8'))
         for pages in content:
             for threads in pages['threads']:
                 content = self._get_content(self._get_thread_url(thread, threads["no"]))
                 if content is not None:
-                    thread_content = json.loads(content)
+                    thread_content = json.loads(content.decode('utf-8'))
                     for post in thread_content['posts']:
                         if "tim" in post:
                             image_url = self._get_image_url(thread, str(post["tim"]), post["ext"])
