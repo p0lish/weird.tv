@@ -1,20 +1,6 @@
 window.requestAnimationFrame = window.requestAnimationFrame || window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame || window.msRequestAnimationFrame || function (callback) {
     setTimeout(callback, 1000 / 60);
 };
-(function (i, s, o, g, r, a, m) {
-    i['GoogleAnalyticsObject'] = r;
-    i[r] = i[r] || function () {
-        (i[r].q = i[r].q || []).push(arguments)
-    }, i[r].l = 1 * new Date();
-    a = s.createElement(o), m = s.getElementsByTagName(o)[0];
-    a.async = 1;
-    a.src = g;
-    m.parentNode.insertBefore(a, m)
-})(window, document, 'script', 'https://www.googletagmanager.com/gtag/js?id=UA-115074342-1', 'gtag');
-
-gtag('create', 'UA-115074342-1', 'auto');
-gtag('send', 'pageview');
-
 var TV = (function () {
     var TV = {},
         TV_WIDTH = 800,
