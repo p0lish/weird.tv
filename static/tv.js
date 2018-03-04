@@ -32,9 +32,9 @@ var TV = (function () {
     function getVideo() {
         shuffle(TV.playlist);
         if (TV.playlist === undefined) {
-            setInterval(function(){
+            setTimeout(function(){
              getVideo();
-            }, 100);
+            }, 1000);
         } else {
             if (TV.playlist.length > 1) {
                 return TV.playlist.pop();
