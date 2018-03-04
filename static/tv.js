@@ -81,6 +81,7 @@ var TV = (function () {
         blockOffset = Math.floor(Math.random() * 150) + 2;
         playAudio('st');
         video.src = getVideo();
+        ga('send', 'event', 'Video', video.src);
     }
 
     function drawVideo() {
