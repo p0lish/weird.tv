@@ -11,6 +11,7 @@ window.requestAnimationFrame = window.requestAnimationFrame || window.webkitRequ
     a.src = g;
     m.parentNode.insertBefore(a, m)
 })(window, document, 'script', 'https://www.googletagmanager.com/gtag/js?id=UA-115074342-1', 'gtag');
+
 gtag('create', 'UA-115074342-1', 'auto');
 gtag('send', 'pageview');
 
