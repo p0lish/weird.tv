@@ -7,7 +7,6 @@ var TV = (function () {
         TV_HEIGHT = 450,
         video, videoWidth = TV_WIDTH,
         videoHeight = TV_HEIGHT,
-        videoIndex = 0,
         videoLoading = true,
         videoTimeoutID, radius = 10,
         canvas, canvasWidth = TV_WIDTH,
@@ -17,13 +16,29 @@ var TV = (function () {
         pixelOffset1, pixelOffset2, blockOffset, audio = {},
         audioContext, init = false;
 
+    function getVideo() {
+        shuffle(TV.playlist);
+        if (TV.playlist === undefined) {
+            setInterval(function(){
+             getVideo();
+            }, 100);
+        } else {
+            if (TV.playlist.length > 1) {
+                return TV.playlist.pop();
+            } else {
+                return TV.playlist[0];
+            }
+        }
+    }
 
     function shuffle(a) {
-        for (let i = a.length - 1; i > 0; i--) {
+        if (a === undefined) {
+            return null;
+        }
+        for (var i = a.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [a[i], a[j]] = [a[j], a[i]];
         }
-        return a;
     }
 
     function getCanvasRatio() {
@@ -43,7 +58,8 @@ var TV = (function () {
     }
 
     function getVideoSource() {
-        fetch(location.href + 'getvideo')
+        var ch = 'getvideo';
+        fetch(window.location.href + ch)
             .then(function (response) {
                 var contentType = response.headers.get("content-type");
                 if (contentType && contentType.indexOf("application/json") !== -1) {
@@ -54,7 +70,7 @@ var TV = (function () {
             })
             .catch(function (error) {
                 console.error(error);
-            });;
+            });
     }
 
     function loadNextVideo() {
@@ -64,8 +80,7 @@ var TV = (function () {
         pixelOffset2 = Math.floor(Math.random() * 3) + 1;
         blockOffset = Math.floor(Math.random() * 150) + 2;
         playAudio('st');
-        shuffle(TV.playlist);
-        video.src = TV.playlist.pop();
+        video.src = getVideo();
     }
 
     function drawVideo() {

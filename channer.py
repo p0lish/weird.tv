@@ -38,6 +38,7 @@ class Channer:
             return "timeout"
 
     def _get_thread_elements(self, thread):
+        self.vids = []
         current_url = "/".join((self.API_URL, thread, "catalog.json"))
         content = json.loads(self._get_content(current_url).decode('utf-8'))
         for pages in content:
@@ -61,10 +62,10 @@ class Channer:
 
     def updateVids(self):
         self._get_thread_elements("wsg")
-        print("{} videos saved".format(len(self.vids)))
-        return self.vids
-
-    def saveVids(self):
-        videos = {"videos": self.updateVids()}
-        with open("static/videos.json", "w") as f:
+        filename = "static/videos.json"
+        videos = {"videos": self.vids}
+        with open(filename, "w") as f:
             f.write(json.dumps(videos))
+        data = {"size": len(self.vids)}
+        return data
+

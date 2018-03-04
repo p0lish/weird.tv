@@ -15,16 +15,16 @@ def tv():
     return render_template('index.html')
 
 
-@app.route('/getvideo')
+@app.route('/getvideo/')
 def vidlist():
     return send_from_directory('static', 'videos.json')
 
 
-@app.route('/___update')
+@app.route('/___update/')
 def update():
     channer = Channer()
-    channer.updateVids()
-    return "update called"
+    data = channer.updateVids()
+    return "update finished {} vids found.".format(data["size"])
 
 
 if __name__ == '__main__':
