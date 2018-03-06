@@ -81,10 +81,7 @@ var TV = (function () {
         blockOffset = Math.floor(Math.random() * 150) + 2;
         playAudio('st');
         video.src = getVideo();
-        gtag('event', 'watch-video', {
-            'event_category': 'change_video',
-            'event_label': video.src
-        });
+
     }
 
     function drawVideo() {
@@ -130,6 +127,10 @@ var TV = (function () {
                 var play = document.querySelector('.autoplay');
                 play.style.display = 'block';
                 play.onmousedown = function (event) {
+                    gtag('event', 'manual_change', {
+                            'event_category': 'change_video',
+                            'event_label': video.src
+                    });
                     play.style.display = 'none';
                    playVideo();
                 };
@@ -186,6 +187,11 @@ var TV = (function () {
         video.oncanplaythrough = function () {
             clearTimeout(videoTimeoutID);
             videoTimeoutID = setTimeout(playVideo, 200);
+            gtag('event', 'auto_change', {
+                            'event_category': 'change_video',
+                            'event_label': video.src
+                    });
+
         };
         video.onstalled = video.onerror = video.onended = loadNextVideo;
         video.load();
