@@ -14,32 +14,8 @@ var TV = (function () {
         canvasTop = 0,
         testcardImage, testcardCanvas, testcardContext, tempCanvas, tempContext, testcardMod = 0,
         pixelOffset1, pixelOffset2, blockOffset, audio = {},
-        audioContext, init = false;
+        audioContext, init = false,
 
-    function getVideo() {
-        shuffle(TV.playlist);
-        if (TV.playlist === undefined) {
-            setTimeout(function(){
-             getVideo();
-            }, 1000);
-        } else {
-            if (TV.playlist.length > 1) {
-                return TV.playlist.pop();
-            } else {
-                return TV.playlist[0];
-            }
-        }
-    }
-
-    function shuffle(a) {
-        if (a === undefined) {
-            return null;
-        }
-        for (var i = a.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [a[i], a[j]] = [a[j], a[i]];
-        }
-    }
 
     function getCanvasRatio() {
         var body = document.body,
@@ -57,31 +33,16 @@ var TV = (function () {
         canvasTop = (canvas.height - canvasHeight) / 2;
     }
 
-    function getVideoSource() {
-        var ch = 'getvideo';
-        fetch(window.location.href + ch)
-            .then(function (response) {
-                var contentType = response.headers.get("content-type");
-                if (contentType && contentType.indexOf("application/json") !== -1) {
-                    return response.json().then(function (json) {
-                        TV.playlist = json.videos;
-                    })
-                }
-            })
-            .catch(function (error) {
-                console.error(error);
-            });
-    }
-
     function loadNextVideo() {
+        video.muted = true;
         videoLoading = true;
         testcardContext.drawImage(testcardImage, 0, 0, testcardCanvas.width, testcardCanvas.height);
         pixelOffset1 = Math.floor(Math.random() * 3) + 1;
         pixelOffset2 = Math.floor(Math.random() * 3) + 1;
         blockOffset = Math.floor(Math.random() * 150) + 2;
         playAudio('st');
-        video.src = getVideo();
-
+        video.muted = false;
+        video.src = 'video.webm' + '?id=' +  Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     }
 
     function drawVideo() {
@@ -111,7 +72,9 @@ var TV = (function () {
             context.clearRect(0, 0, canvas.width, canvas.height);
             try {
                 context.drawImage(video, 0, canvasTop, canvasWidth, canvasHeight);
-            } catch (e) {}
+            } catch (e) {
+                console.log('e :', e);
+            }
         }
         requestAnimationFrame(drawVideo);
     }
@@ -126,14 +89,6 @@ var TV = (function () {
             promise.catch(function (error) {
                 var play = document.querySelector('.autoplay');
                 play.style.display = 'block';
-                play.onmousedown = function (event) {
-                    gtag('event', 'manual_change', {
-                            'event_category': 'change_video',
-                            'event_label': video.src
-                    });
-                    play.style.display = 'none';
-                   playVideo();
-                };
             });
         }
     }
@@ -172,42 +127,47 @@ var TV = (function () {
         }
         init = true;
         canvas = document.querySelector('.tv');
-        getVideoSource();
         testcardImage = new Image();
         testcardImage.src = testcard;
+
         window.AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (window.AudioContext) {
-            audioContext = new AudioContext();
-            loadAudio('st');
-        }
+
         video = document.createElement('video');
-        video.autoPlay = false;
+        video.autoPlay = true;
         video.loop = false;
         video.muted = false;
-        video.oncanplaythrough = function () {
-            clearTimeout(videoTimeoutID);
-            videoTimeoutID = setTimeout(playVideo, 200);
-            gtag('event', 'auto_change', {
-                            'event_category': 'change_video',
-                            'event_label': video.src
-                    });
-
-        };
-        video.onstalled = video.onerror = video.onended = loadNextVideo;
         video.load();
-        window.onresize = resizeCanvas;
+
         canvas.width = TV_WIDTH;
         canvas.height = TV_HEIGHT;
-        canvas.oncontextmenu = function (event) {
-            event.preventDefault();
-        };
+
         testcardCanvas = document.createElement('canvas');
         testcardCanvas.width = canvas.width / 2;
         testcardCanvas.height = canvas.height / 2;
         tempCanvas = document.createElement('canvas');
         tempCanvas.width = canvas.width / 2;
         tempCanvas.height = canvas.height / 2;
-        var alt = document.querySelector('.alt');
+        let alt = document.querySelector('.alt');
+
+
+
+        window.onresize = resizeCanvas;
+        video.onstalled = video.onerror = video.onended = loadNextVideo;
+        video.oncanplaythrough = function () {
+            clearTimeout(videoTimeoutID);
+            videoTimeoutID = setTimeout(playVideo, 1000);
+        };
+
+        canvas.oncontextmenu = function (event) {
+            event.preventDefault();
+        };
+
+        if (window.AudioContext) {
+            audioContext = new AudioContext();
+            loadAudio('st');
+        }
+
+
         try {
             context = canvas.getContext('2d');
             tempContext = tempCanvas.getContext('2d');
@@ -219,11 +179,16 @@ var TV = (function () {
         canvas.onmousedown = loadNextVideo;
         if (document.body.className === 'disabled') {
             alt.style.display = 'block';
-            TV.playlist = [];
+            TV.url = '';
         }
-        drawVideo();
         clearTimeout(videoTimeoutID);
-        videoTimeoutID = setTimeout(loadNextVideo, 100);
+        drawVideo();
+        setTimeout(() => {
+            console.log("play");
+
+            loadNextVideo();
+        }, 1000);
+
     };
     return TV;
 })();
