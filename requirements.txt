@@ -1,3 +1,4 @@
 Flask==2.2.5
 requests==2.20.0
 urllib3>=1.25.9 # not directly required, pinned by Snyk to avoid a vulnerability
+certifi>=2023.7.22 # not directly required, pinned by Snyk to avoid a vulnerability
