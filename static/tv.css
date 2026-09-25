@@ -139,3 +139,65 @@ a:link {
     color: #222;
     text-decoration: underline
 }
+.osd {
+    position: absolute;
+    top: 5%;
+    right: 5%;
+    max-width: 50%;
+    text-align: right;
+    font-family: "VT323", "Courier New", monospace;
+    color: #3f3;
+    text-shadow: 0 0 6px rgba(51, 255, 51, .8), 2px 2px 0 #000;
+    opacity: 0;
+    transition: opacity .4s;
+    pointer-events: none
+}
+
+.osd.visible {
+    opacity: 1
+}
+
+.osd.visible .osd-source {
+    pointer-events: auto
+}
+
+.osd-channel {
+    font-size: 48px;
+    line-height: 1
+}
+
+.osd-title {
+    font-size: 20px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap
+}
+
+.osd-source {
+    color: #3f3;
+    font-size: 16px;
+    text-decoration: underline
+}
+
+.help {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 12px;
+    text-align: center;
+    font: 13px "Courier New", monospace;
+    color: rgba(255, 255, 255, .5);
+    opacity: 0;
+    transition: opacity .4s;
+    pointer-events: none
+}
+
+body:hover .help {
+    opacity: 1
+}
+
+@media (hover: none) {
+    .help {
+        display: none
+    }
+}
