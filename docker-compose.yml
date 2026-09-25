@@ -1,0 +1,16 @@
+services:
+  weirdtv:
+    build: .
+    ports:
+      - "8088:8088"
+    volumes:
+      - weirdtv-data:/data
+    environment:
+      WEIRDTV_BOARDS: wsg
+      # WEIRDTV_UPDATE_TOKEN: change-me
+      # WEIRDTV_QUIET_HOURS: "02:00-06:00"
+      # WEIRDTV_TIMEZONE: Europe/Budapest
+    restart: unless-stopped
+
+volumes:
+  weirdtv-data:

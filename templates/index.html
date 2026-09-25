@@ -23,16 +23,62 @@
     <meta property="og:url" content="//">
     <meta property="og:site_name" content="Weird TV">
     <meta property="og:description" content="Channel of weird and bewildering videos.">
+    {% if initial %}
+    <meta property="og:title" content="{{ initial.title or initial.filename }} - Weird TV">
+    {% endif %}
     <link rel="stylesheet" href="{{ url_for('static', filename='tv.css') }}">
 </head>
 
 <body>
     <canvas class="tv"></canvas>
+    <canvas class="crt" aria-hidden="true"></canvas>
     <div class="scanlines"></div>
-    <script src="{{ url_for('static', filename='image.js') }}"></script>
+    <div class="offair-message" aria-live="polite"></div>
+    <div class="vhs" aria-hidden="true">
+        <div class="vhs-mode"></div>
+        <div class="vhs-clock"></div>
+    </div>
+    <div class="osd" aria-live="polite">
+        <div class="osd-channel"></div>
+        <div class="osd-name"></div>
+        <div class="osd-title"></div>
+        <div class="osd-meta"></div>
+        <a class="osd-source" target="_blank" rel="noopener noreferrer"></a>
+        <div class="osd-message"></div>
+    </div>
+    <div class="help">click next &middot; &uarr;&darr; channel &middot; 0-9 tune &middot; +/- vote &middot; c share &middot; ? menu</div>
+    <button class="menu-button" type="button" aria-label="Menu">&#9881;</button>
+    <div class="menu" hidden>
+        <section>
+            <h2>Channels</h2>
+            <div class="menu-channels"></div>
+        </section>
+        <section>
+            <h2>This clip</h2>
+            <div class="menu-row">
+                <button type="button" data-action="prev" aria-label="Previous clip">&#9198;</button>
+                <button type="button" data-action="up" aria-label="Like">&#9650; <span class="menu-score"></span></button>
+                <button type="button" data-action="down" aria-label="Dislike">&#9660;</button>
+                <button type="button" data-action="share">share</button>
+                <button type="button" data-action="next" aria-label="Next clip">&#9197;</button>
+            </div>
+        </section>
+        <section>
+            <h2>Effects</h2>
+            <div class="menu-effects"></div>
+        </section>
+        <div class="menu-row">
+            <button type="button" data-action="mute"></button>
+            <button type="button" data-action="fullscreen">fullscreen</button>
+            <button type="button" data-action="close">close</button>
+        </div>
+        <p class="menu-watching"></p>
+        <p class="menu-keys">&rarr;/space next clip &middot; &larr; previous &middot; &uarr;&darr; channel &middot; 0 live &middot; 1-9 channels &middot; +/- vote &middot; c share &middot; m mute &middot; f fullscreen &middot; i info &middot; e all effects</p>
+    </div>
+    <div class="autoplay" title="Click to turn the sound on"></div>
+    <div class="alt">Your browser can't show this channel. Try a newer one.</div>
+    <script>window.WEIRDTV_INITIAL = {{ initial|tojson }};</script>
     <script src="{{ url_for('static', filename='tv.js') }}"></script>
-
-
 </body>
 
 </html>
