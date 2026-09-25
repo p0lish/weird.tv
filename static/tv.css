@@ -201,3 +201,16 @@ body:hover .help {
         display: none
     }
 }
+
+.no-scanlines .scanlines {
+    display: none
+}
+
+.osd-message {
+    font-size: 20px;
+    margin-top: 4px
+}
+
+.osd-message:empty {
+    display: none
+}

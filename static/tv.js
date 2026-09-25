@@ -6,6 +6,13 @@ const TV = (() => {
     // how long the channel info stays on screen
     const OSD_MS = 4000;
     const HISTORY_SIZE = 50;
+    const EFFECTS_STORAGE_KEY = 'weirdtv.effects';
+    // toggleable visual/audio effects and the key that toggles each one
+    const EFFECTS = {
+        scanlines: { key: 's', label: 'SCANLINES' },
+        glitch: { key: 'g', label: 'GLITCH' },
+        noise: { key: 'z', label: 'STATIC SOUND' },
+    };
 
     let canvas, context, video, osd, autoplayOverlay;
     let testcardImage, testcardCanvas, testcardContext, tempCanvas, tempContext;
@@ -19,6 +26,54 @@ const TV = (() => {
     let history = [], cursor = -1;
     let requestID = 0;
     let initialized = false;
+    let effects = loadEffects();
+
+    // defaults < saved preference < ?fx=scanlines,noise (or ?fx=none) in the URL
+    function loadEffects() {
+        const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        let result = { scanlines: true, glitch: !reducedMotion, noise: true };
+        try {
+            Object.assign(result, JSON.parse(localStorage.getItem(EFFECTS_STORAGE_KEY)) || {});
+        } catch (e) {
+            // storage unavailable or corrupt, keep the defaults
+        }
+        const fx = new URLSearchParams(window.location.search).get('fx');
+        if (fx !== null) {
+            const enabled = fx.split(',');
+            Object.keys(EFFECTS).forEach((name) => {
+                result[name] = enabled.includes(name) || enabled.includes('all');
+            });
+        }
+        return result;
+    }
+
+    function saveEffects() {
+        try {
+            localStorage.setItem(EFFECTS_STORAGE_KEY, JSON.stringify(effects));
+        } catch (e) {
+            // not fatal, the setting just won't survive a reload
+        }
+    }
+
+    function applyEffects() {
+        document.body.classList.toggle('no-scanlines', !effects.scanlines);
+    }
+
+    function setEffect(name, enabled) {
+        effects[name] = enabled;
+        saveEffects();
+        applyEffects();
+        showOSD(EFFECTS[name].label + (enabled ? ' ON' : ' OFF'));
+    }
+
+    // turn everything off, or back on if everything is already off
+    function toggleAllEffects() {
+        const enable = !Object.keys(EFFECTS).some((name) => effects[name]);
+        Object.keys(EFFECTS).forEach((name) => { effects[name] = enable; });
+        saveEffects();
+        applyEffects();
+        showOSD('EFFECTS ' + (enable ? 'ON' : 'OFF'));
+    }
 
     function resizeCanvas() {
         const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -41,7 +96,9 @@ const TV = (() => {
         pixelOffset1 = Math.floor(Math.random() * 3) + 1;
         pixelOffset2 = Math.floor(Math.random() * 3) + 1;
         blockOffset = Math.floor(Math.random() * 150) + 2;
-        playAudio(STATIC_SOUND);
+        if (effects.noise) {
+            playAudio(STATIC_SOUND);
+        }
     }
 
     async function fetchNext() {
@@ -107,9 +164,15 @@ const TV = (() => {
         return history[cursor];
     }
 
-    function showOSD() {
+    function showOSD(message) {
+        osd.querySelector('.osd-message').textContent = typeof message === 'string' ? message : '';
         const item = current();
         if (!item) {
+            if (typeof message === 'string') {
+                osd.classList.add('visible');
+                clearTimeout(osdTimeoutID);
+                osdTimeoutID = setTimeout(() => osd.classList.remove('visible'), OSD_MS);
+            }
             return;
         }
         const number = String(channel).padStart(2, '0');
@@ -130,6 +193,12 @@ const TV = (() => {
     }
 
     function drawTestcard() {
+        if (!effects.glitch) {
+            if (testcardImage.complete) {
+                context.drawImage(testcardImage, 0, 0, canvas.width, canvas.height);
+            }
+            return;
+        }
         testcardMod = (testcardMod + 1) % 3;
         if (testcardMod !== 0) {
             return;
@@ -245,8 +314,16 @@ const TV = (() => {
             case 'i':
                 showOSD();
                 break;
-            default:
-                return;
+            case 'e':
+                toggleAllEffects();
+                break;
+            default: {
+                const name = Object.keys(EFFECTS).find((n) => EFFECTS[n].key === event.key);
+                if (!name) {
+                    return;
+                }
+                setEffect(name, !effects[name]);
+            }
         }
         event.preventDefault();
         unlockAudio();
@@ -315,13 +392,17 @@ const TV = (() => {
         canvas.addEventListener('contextmenu', (event) => event.preventDefault());
         autoplayOverlay.addEventListener('click', unlockAudio);
 
+        applyEffects();
         resizeCanvas();
         testcardImage.onload = () => testcardContext.drawImage(testcardImage, 0, 0, testcardCanvas.width, testcardCanvas.height);
         draw();
         nextChannel();
     }
 
-    return { init, next: nextChannel, previous: previousChannel, mute: toggleMute };
+    return {
+        init, next: nextChannel, previous: previousChannel, mute: toggleMute,
+        setEffect, effects: () => Object.assign({}, effects),
+    };
 })();
 
 document.addEventListener('DOMContentLoaded', TV.init);

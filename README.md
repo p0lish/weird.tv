@@ -24,6 +24,14 @@ first full scrape of a board takes a few minutes.
 | `m` | mute / unmute |
 | `f` | fullscreen |
 | `i` | show channel info |
+| `s` | scanlines on/off |
+| `g` | glitchy static between channels on/off (plain test card when off) |
+| `z` | static sound on/off |
+| `e` | all effects off / on |
+
+Effect settings are remembered per browser. They can also be forced with a URL parameter,
+e.g. `/?fx=none` or `/?fx=scanlines,noise` (`all` enables everything). The glitch effect
+starts off for visitors whose system asks for reduced motion.
 
 ## Configuration (environment variables)
 
