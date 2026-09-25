@@ -178,7 +178,8 @@ const TV = (() => {
         pixelOffset1 = Math.floor(Math.random() * 3) + 1;
         pixelOffset2 = Math.floor(Math.random() * 3) + 1;
         blockOffset = Math.floor(Math.random() * 150) + 2;
-        if (effects.noise) {
+        // stay quiet while retrying behind the off-air card
+        if (effects.noise && !offair) {
             playAudio(STATIC_SOUND);
         }
     }
@@ -522,7 +523,7 @@ const TV = (() => {
                 return;
             }
             if (item.offair) {
-                setOffAir(item.message);
+                setOffAir(item.message, item.retry);
                 return;
             }
         }
@@ -591,7 +592,9 @@ const TV = (() => {
         });
     }
 
-    function setOffAir(message) {
+    // `retry` is how many seconds the server suggests waiting before asking again
+    function setOffAir(message, retry) {
+        const wasOffAir = !!offair;
         offair = message;
         offairEl.textContent = message || '';
         document.body.classList.toggle('offair', !!message);
@@ -604,9 +607,12 @@ const TV = (() => {
         clearTimeout(retryTimeoutID);
         videoLoading = true;
         video.pause();
-        playTone();
-        showOSD();
-        retryTimeoutID = setTimeout(() => (isLive() ? tuneLive() : nextClip()), OFFAIR_RETRY_MS);
+        if (!wasOffAir) {
+            playTone();
+            showOSD();
+        }
+        const delay = retry ? retry * 1000 : OFFAIR_RETRY_MS;
+        retryTimeoutID = setTimeout(() => (isLive() ? tuneLive() : nextClip()), delay);
     }
 
     // --- channels & live -------------------------------------------------
@@ -672,7 +678,7 @@ const TV = (() => {
             return;
         }
         if (state.offair) {
-            setOffAir(state.message);
+            setOffAir(state.message, state.retry);
             return;
         }
         if (state.id === liveEndedID) {

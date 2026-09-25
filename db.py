@@ -100,8 +100,9 @@ class Database:
 
     # --- scraping -----------------------------------------------------------
 
-    def sync_board(self, board, videos, now=None):
-        """Upsert the clips currently on `board` and mark the rest as gone."""
+    def sync_board(self, board, videos, now=None, mark_missing=True):
+        """Upsert clips seen on `board`; with `mark_missing`, `videos` is the whole
+        board and every other clip of it is marked as gone."""
         now = int(now or time.time())
         with self.connect(immediate=True) as conn:
             for v in videos:
@@ -114,7 +115,7 @@ class Database:
                            url = excluded.url, thread = excluded.thread, title = excluded.title,
                            filename = excluded.filename, last_seen = excluded.last_seen, gone = 0""",
                     dict({"width": None, "height": None, "size": None, "thread": None}, **v, now=now))
-            if videos:
+            if videos and mark_missing:
                 seen = {v["id"] for v in videos}
                 known = [r[0] for r in conn.execute("SELECT id FROM videos WHERE board = ? AND gone = 0", (board,))]
                 conn.executemany("UPDATE videos SET gone = 1 WHERE id = ?",

@@ -108,15 +108,17 @@ def create_app(config=None):
         except Exception:
             log.exception("archive run failed")
 
-    def every(minutes, job, name):
+    def every(minutes, job, name, empty_retry_minutes=None):
         def loop():
             while True:
                 job()
-                time.sleep(minutes * 60)
+                # retry sooner while there is nothing to show at all
+                wait = empty_retry_minutes if empty_retry_minutes and db.count() == 0 else minutes
+                time.sleep(min(minutes, wait) * 60)
         threading.Thread(target=loop, daemon=True, name=name).start()
 
     if app.config["REFRESH_MINUTES"] > 0:
-        every(app.config["REFRESH_MINUTES"], scrape, "scraper")
+        every(app.config["REFRESH_MINUTES"], scrape, "scraper", empty_retry_minutes=1)
     if app.config["ARCHIVE_MINUTES"] > 0:
         every(app.config["ARCHIVE_MINUTES"], archive, "archiver")
 
@@ -137,7 +139,21 @@ def create_app(config=None):
         return None
 
     def no_signal(channel):
-        return {"offair": True, "reason": "empty", "message": "NO SIGNAL ON " + channel["name"]}
+        """Why `channel` has nothing to show, and how soon the player should retry."""
+        if db.count() == 0:
+            scraper = channer.status
+            if scraper["scanning"] and scraper["total"]:
+                return {"offair": True, "reason": "scanning", "retry": 5,
+                        "message": "TUNING IN... SCANNING /{}/ {}/{}".format(
+                            scraper["board"], scraper["done"], scraper["total"])}
+            if scraper["scanning"] or scraper["finished"] is None:
+                return {"offair": True, "reason": "scanning", "retry": 5, "message": "TUNING IN..."}
+            if scraper["error"]:
+                return {"offair": True, "reason": "error", "retry": 30,
+                        "message": "NO SIGNAL - CAN'T REACH 4CHAN: " + scraper["error"]}
+            return {"offair": True, "reason": "empty", "retry": 30,
+                    "message": "NO SIGNAL - NO VIDEOS ON /" + "/, /".join(app.config["BOARDS"]) + "/"}
+        return {"offair": True, "reason": "empty", "retry": 30, "message": "NO SIGNAL ON " + channel["name"]}
 
     def public_video(video, client=None):
         """The video metadata exposed to the browser."""
@@ -243,7 +259,8 @@ def create_app(config=None):
     @app.route("/api/status")
     def status():
         return jsonify(db.stats() | {"boards": app.config["BOARDS"],
-                                     "offair": bool(off_air())})
+                                     "offair": bool(off_air()),
+                                     "scraper": channer.status})
 
     @app.route("/video/<video_id>")
     def video(video_id):
