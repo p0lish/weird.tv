@@ -5,8 +5,6 @@ use If-Modified-Since, and don't refetch a thread more than once per 10s.
 """
 import json
 import logging
-import os
-import tempfile
 import threading
 import time
 
@@ -21,10 +19,8 @@ VIDEO_EXTENSIONS = (".webm", ".mp4")
 
 
 class Channer:
-    def __init__(self, boards=("wsg",), playlist_path="static/videos.json",
-                 min_interval=1.0, timeout=20, session=None):
+    def __init__(self, boards=("wsg",), min_interval=1.0, timeout=20, session=None):
         self.boards = list(boards)
-        self.playlist_path = playlist_path
         self.min_interval = min_interval
         self.timeout = timeout
         self.session = session or requests.Session()
@@ -86,10 +82,12 @@ class Channer:
         }
 
     def scrape_board(self, board):
-        """Return every video currently posted on `board`."""
+        """Return every video currently posted on `board`, or None if the board
+        index couldn't be fetched (so callers don't mistake an outage for an
+        empty board)."""
         threads = self._get_json("{}/{}/threads.json".format(API_URL, board))
         if threads is None:
-            return []
+            return None
         videos = []
         for page in threads:
             for thread in page.get("threads", []):
@@ -109,37 +107,27 @@ class Channer:
             del self._cache[url]
         return videos
 
-    def update(self):
-        """Scrape all boards and atomically rewrite the playlist file.
+    def update(self, db):
+        """Scrape all boards into the database. Concurrent calls are serialized.
 
-        Returns the number of videos found. Concurrent calls are serialized.
+        Returns the number of videos found.
         """
         with self._lock:
-            videos, seen = [], set()
+            found = 0
             for board in self.boards:
-                for video in self.scrape_board(board):
-                    if video["id"] not in seen:
-                        seen.add(video["id"])
-                        videos.append(video)
-            if not videos:
-                log.warning("scrape found no videos, keeping the old playlist")
-                return 0
-            write_playlist(self.playlist_path, videos)
-            log.info("playlist updated: %d videos", len(videos))
-            return len(videos)
-
-
-def write_playlist(path, videos):
-    payload = {"updated": int(time.time()), "videos": videos}
-    directory = os.path.dirname(os.path.abspath(path))
-    fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
-    with os.fdopen(fd, "w") as f:
-        json.dump(payload, f)
-    os.replace(tmp, path)
+                videos = self.scrape_board(board)
+                if videos is None:
+                    log.warning("couldn't fetch /%s/, keeping its clips as they are", board)
+                    continue
+                unique = list({v["id"]: v for v in videos}.values())
+                db.sync_board(board, unique)
+                found += len(unique)
+                log.info("/%s/: %d videos", board, len(unique))
+            return found
 
 
 def read_playlist(path):
-    """Load a playlist, accepting the legacy format (a list of plain URLs)."""
+    """Load a legacy videos.json playlist (a list of URLs or of video dicts)."""
     try:
         with open(path) as f:
             data = json.load(f)

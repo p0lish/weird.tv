@@ -166,6 +166,20 @@ a:link {
     line-height: 1
 }
 
+.osd-name {
+    font-size: 22px;
+    letter-spacing: 2px
+}
+
+.osd-meta {
+    font-size: 16px
+}
+
+.osd-meta:empty,
+.osd-title:empty {
+    display: none
+}
+
 .osd-title {
     font-size: 20px;
     overflow: hidden;
@@ -213,4 +227,169 @@ body:hover .help {
 
 .osd-message:empty {
     display: none
+}
+
+.crt {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none
+}
+
+/* the 2D canvas stays underneath to receive clicks and feed the shader */
+.crt-on .tv {
+    opacity: 0
+}
+
+.crt-on .crt {
+    display: block
+}
+
+.offair-message {
+    display: none;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    padding: 12px 28px;
+    background: #000;
+    color: #fff;
+    font: 32px "Courier New", monospace;
+    letter-spacing: 3px;
+    text-align: center;
+    pointer-events: none
+}
+
+.offair .offair-message {
+    display: block
+}
+
+.vhs {
+    display: none;
+    position: absolute;
+    left: 5%;
+    top: 5%;
+    bottom: 5%;
+    font: bold 28px "VT323", "Courier New", monospace;
+    color: #fff;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, .8), 0 0 4px rgba(255, 255, 255, .6);
+    pointer-events: none
+}
+
+.vhs-on .vhs {
+    display: block
+}
+
+.vhs-clock {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    white-space: pre;
+    font-size: 24px
+}
+
+.menu-button {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, .5);
+    color: #fff;
+    font-size: 24px;
+    line-height: 44px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .4s
+}
+
+body:hover .menu-button,
+.menu-button:focus-visible {
+    opacity: .8
+}
+
+@media (hover: none) {
+    .menu-button {
+        opacity: .6
+    }
+}
+
+.menu {
+    position: absolute;
+    right: 16px;
+    bottom: 72px;
+    width: 340px;
+    max-width: calc(100% - 32px);
+    max-height: calc(100% - 96px);
+    box-sizing: border-box;
+    overflow-y: auto;
+    padding: 16px;
+    background: rgba(0, 0, 0, .92);
+    border: 2px solid #3f3;
+    font: 16px "Courier New", monospace;
+    color: #3f3
+}
+
+.menu[hidden] {
+    display: none
+}
+
+.menu h2 {
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin: 0 0 6px;
+    color: rgba(51, 255, 51, .7)
+}
+
+.menu section {
+    margin-bottom: 14px
+}
+
+.menu-channels,
+.menu-effects,
+.menu-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px
+}
+
+.menu-row {
+    margin-bottom: 10px
+}
+
+.menu button {
+    padding: 6px 10px;
+    min-height: 32px;
+    border: 1px solid #3f3;
+    color: #3f3;
+    font: inherit;
+    cursor: pointer
+}
+
+.menu button:hover,
+.menu button:focus-visible {
+    background: rgba(51, 255, 51, .15)
+}
+
+.menu button[aria-pressed="true"] {
+    background: #3f3;
+    color: #000
+}
+
+.menu-watching,
+.menu-keys {
+    font-size: 12px;
+    color: rgba(51, 255, 51, .7);
+    margin-top: 6px
+}
+
+@media (hover: none) {
+    .menu-keys {
+        display: none
+    }
 }
