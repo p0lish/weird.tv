@@ -29,6 +29,9 @@ class Channer:
         # url -> (last_modified header, parsed json), survives between updates
         self._cache = {}
         self._lock = threading.Lock()
+        # progress of the current scrape, shown to viewers while the library is empty
+        self.status = {"scanning": False, "board": None, "done": 0, "total": 0,
+                       "error": None, "finished": None}
 
     def _get_json(self, url):
         """GET a JSON document, honouring rate limits and If-Modified-Since.
@@ -46,6 +49,7 @@ class Channer:
             resp = self.session.get(url, headers=headers, timeout=self.timeout)
         except requests.RequestException as exc:
             log.warning("request to %s failed: %s", url, exc)
+            self.status["error"] = "{} ({})".format(type(exc).__name__, url)
             return None
         finally:
             self._last_request = time.monotonic()
@@ -54,6 +58,7 @@ class Channer:
             return cached[1]
         if resp.status_code != 200:
             log.warning("request to %s returned HTTP %s", url, resp.status_code)
+            self.status["error"] = "HTTP {} ({})".format(resp.status_code, url)
             return None
         try:
             data = resp.json()
@@ -81,27 +86,28 @@ class Channer:
             "size": post.get("fsize"),
         }
 
-    def scrape_board(self, board):
+    def scrape_board(self, board, on_thread=None):
         """Return every video currently posted on `board`, or None if the board
         index couldn't be fetched (so callers don't mistake an outage for an
-        empty board)."""
+        empty board). `on_thread(videos)` is called as each thread is read."""
         threads = self._get_json("{}/{}/threads.json".format(API_URL, board))
         if threads is None:
             return None
+        numbers = [t["no"] for page in threads for t in page.get("threads", [])]
+        self.status.update(board=board, done=0, total=len(numbers))
         videos = []
-        for page in threads:
-            for thread in page.get("threads", []):
-                data = self._get_json("{}/{}/thread/{}.json".format(API_URL, board, thread["no"]))
-                if not data or not data.get("posts"):
-                    continue
-                op = data["posts"][0]
-                for post in data["posts"]:
-                    video = self._video_from_post(board, op, post)
-                    if video:
-                        videos.append(video)
+        for number in numbers:
+            data = self._get_json("{}/{}/thread/{}.json".format(API_URL, board, number))
+            self.status["done"] += 1
+            if not data or not data.get("posts"):
+                continue
+            op = data["posts"][0]
+            found = [v for v in (self._video_from_post(board, op, post) for post in data["posts"]) if v]
+            videos.extend(found)
+            if found and on_thread:
+                on_thread(found)
         # drop cache entries of threads that have since been archived/pruned
-        live = {"{}/{}/thread/{}.json".format(API_URL, board, t["no"])
-                for page in threads for t in page.get("threads", [])}
+        live = {"{}/{}/thread/{}.json".format(API_URL, board, number) for number in numbers}
         prefix = "{}/{}/thread/".format(API_URL, board)
         for url in [u for u in self._cache if u.startswith(prefix) and u not in live]:
             del self._cache[url]
@@ -113,16 +119,23 @@ class Channer:
         Returns the number of videos found.
         """
         with self._lock:
+            self.status.update(scanning=True, error=None)
             found = 0
-            for board in self.boards:
-                videos = self.scrape_board(board)
-                if videos is None:
-                    log.warning("couldn't fetch /%s/, keeping its clips as they are", board)
-                    continue
-                unique = list({v["id"]: v for v in videos}.values())
-                db.sync_board(board, unique)
-                found += len(unique)
-                log.info("/%s/: %d videos", board, len(unique))
+            try:
+                for board in self.boards:
+                    # save clips thread by thread so a fresh install has something to
+                    # show within seconds instead of after the whole board is read
+                    videos = self.scrape_board(
+                        board, on_thread=lambda vids, board=board: db.sync_board(board, vids, mark_missing=False))
+                    if videos is None:
+                        log.warning("couldn't fetch /%s/, keeping its clips as they are", board)
+                        continue
+                    unique = list({v["id"]: v for v in videos}.values())
+                    db.sync_board(board, unique)
+                    found += len(unique)
+                    log.info("/%s/: %d videos", board, len(unique))
+            finally:
+                self.status.update(scanning=False, finished=time.time())
             return found
 
 

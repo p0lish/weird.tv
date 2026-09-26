@@ -104,6 +104,26 @@ def test_dead_threads_are_marked_gone(db):
     assert db.count() == 1
 
 
+def test_clips_are_saved_while_scanning(tmp_path):
+    database = Database(str(tmp_path / "test.db"))
+    counts = []
+    routes = api_routes()
+    session = FakeSession(routes)
+    original = session.get
+
+    def get(url, **kwargs):
+        if url.endswith("/thread/2.json"):
+            counts.append(database.count())
+        return original(url, **kwargs)
+
+    session.get = get
+    channer = Channer(min_interval=0, session=session)
+    channer.update(database)
+    # thread 1's clips were already playable while thread 2 was being fetched
+    assert counts == [2]
+    assert channer.status["scanning"] is False and channer.status["done"] == 2
+
+
 def test_board_outage_keeps_clips(db):
     Channer(min_interval=0, session=FakeSession({})).update(db)
     assert db.count() == 3
@@ -305,8 +325,16 @@ def test_update_requires_token(tv_app, monkeypatch):
 
 def test_empty_library(tmp_path):
     tv = make_app(tmp_path)
-    assert tv.test_client().get("/api/next").get_json()["offair"] is True
-    assert tv.test_client().get("/").status_code == 200
+    c = tv.test_client()
+    channer = tv.extensions["weirdtv"]["channer"]
+    data = c.get("/api/next").get_json()
+    assert data["offair"] is True and data["reason"] == "scanning" and data["retry"] == 5
+    channer.status.update(scanning=True, board="wsg", done=12, total=150)
+    assert c.get("/api/next").get_json()["message"] == "TUNING IN... SCANNING /wsg/ 12/150"
+    channer.status.update(scanning=False, finished=1, error="HTTP 403 (https://a.4cdn.org/wsg/threads.json)")
+    data = c.get("/api/next").get_json()
+    assert data["reason"] == "error" and "HTTP 403" in data["message"]
+    assert c.get("/").status_code == 200
 
 
 def test_legacy_playlist_is_imported(tmp_path):
