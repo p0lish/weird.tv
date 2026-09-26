@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 data/
 static/videos.json
+.env
