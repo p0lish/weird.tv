@@ -291,7 +291,8 @@ body:hover .help {
     font-size: 24px
 }
 
-.menu-button {
+.menu-button,
+.download-button {
     position: absolute;
     right: 16px;
     bottom: 16px;
@@ -308,14 +309,27 @@ body:hover .help {
 }
 
 body:hover .menu-button,
-.menu-button:focus-visible {
+.menu-button:focus-visible,
+body:hover .download-button,
+.download-button:focus-visible {
     opacity: .8
 }
 
 @media (hover: none) {
-    .menu-button {
+    .menu-button,
+    .download-button {
         opacity: .6
     }
+}
+
+.download-button {
+    right: 68px;
+    text-align: center;
+    text-decoration: none
+}
+
+.download-button[hidden] {
+    display: none
 }
 
 .menu {

@@ -173,6 +173,12 @@ def create_app(config=None):
             "vote": db.my_vote(video["id"], client),
         }
 
+    def download_name(video):
+        """A filename for saving the clip: its original name with the right extension."""
+        ext = os.path.splitext(video["id"])[1]
+        name = os.path.splitext(os.path.basename(video.get("filename") or ""))[0].strip()
+        return (name or os.path.splitext(video["id"])[0]) + ext
+
     def get_video_or_404(video_id):
         video = db.get(video_id)
         if video is None:
@@ -266,11 +272,14 @@ def create_app(config=None):
     def video(video_id):
         # Only serve clips from our own library so this can't be used as an open proxy.
         entry = get_video_or_404(video_id)
+        # ?download=1 asks the browser to save the clip instead of playing it
+        download = download_name(entry) if request.args.get("download") else None
         if entry["archived_path"]:
             path = archiver.path(entry["archived_path"])
             if os.path.exists(path):
                 return send_file(path, mimetype=MIMETYPES.get(os.path.splitext(path)[1]),
-                                 conditional=True, max_age=86400)
+                                 conditional=True, max_age=86400,
+                                 as_attachment=bool(download), download_name=download)
             db.unarchive(video_id)
         if entry["gone"]:
             abort(404)
@@ -301,6 +310,8 @@ def create_app(config=None):
             if name in upstream.headers:
                 response.headers[name] = upstream.headers[name]
         response.headers["Cache-Control"] = "public, max-age=86400"
+        if download:
+            response.headers.set("Content-Disposition", "attachment", filename=download)
         return response
 
     @app.route("/video.webm")
