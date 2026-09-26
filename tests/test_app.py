@@ -288,6 +288,16 @@ def test_video_proxy_only_serves_library(tv_app, monkeypatch):
     assert c.get("/video/evil").status_code == 404
 
 
+def test_video_download_sets_attachment(tv_app, monkeypatch):
+    http = tv_app.extensions["weirdtv"]["http"]
+    monkeypatch.setattr(http, "get", lambda url, **kw: FakeResponse(
+        200, headers={"Content-Type": "video/webm"}, body=b"abc"))
+    c = tv_app.test_client()
+    assert "Content-Disposition" not in c.get("/video/wsg-111.webm").headers
+    disposition = c.get("/video/wsg-111.webm?download=1").headers["Content-Disposition"]
+    assert disposition.startswith("attachment") and ".webm" in disposition
+
+
 def test_pruned_video_is_marked_gone(tv_app, monkeypatch):
     http = tv_app.extensions["weirdtv"]["http"]
     monkeypatch.setattr(http, "get", lambda url, **kw: FakeResponse(404))

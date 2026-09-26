@@ -1,6 +1,6 @@
 import os
 
-bind = "0.0.0.0:" + os.environ.get("PORT", "8088")
+bind = os.environ.get("HOST", "0.0.0.0") + ":" + os.environ.get("PORT", "8088")
 # One worker so the scraper and archiver threads run only once; video
 # streaming is I/O bound, so threads handle the concurrency.
 workers = 1

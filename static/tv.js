@@ -27,7 +27,7 @@ const TV = (() => {
     };
     const REDUCED_MOTION = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-    let canvas, context, crtCanvas, crt, video, spare, osd, offairEl, autoplayOverlay, menu, vhs;
+    let canvas, context, crtCanvas, crt, video, spare, osd, offairEl, autoplayOverlay, menu, downloadButton, vhs;
     let testcardImage, testcardCanvas, testcardContext, tempCanvas, tempContext;
     let testcardMod = 0, pixelOffset1 = 1, pixelOffset2 = 1, blockOffset = 2;
     let drawRect = { x: 0, y: 0, w: 0, h: 0 };
@@ -475,7 +475,15 @@ const TV = (() => {
             video.src = item.src;
             video.load();
         }
+        updateDownload(item);
         loadTimeoutID = setTimeout(skipBroken, LOAD_TIMEOUT_MS);
+    }
+
+    function updateDownload(item) {
+        downloadButton.hidden = !item;
+        if (item) {
+            downloadButton.href = item.src + '?download=1';
+        }
     }
 
     function pushHistory(item) {
@@ -598,6 +606,9 @@ const TV = (() => {
         offair = message;
         offairEl.textContent = message || '';
         document.body.classList.toggle('offair', !!message);
+        if (message) {
+            updateDownload(null);
+        }
         renderVHS();
         if (!message) {
             return;
@@ -1005,6 +1016,7 @@ const TV = (() => {
         offairEl = document.querySelector('.offair-message');
         autoplayOverlay = document.querySelector('.autoplay');
         menu = document.querySelector('.menu');
+        downloadButton = document.querySelector('.download-button');
         vhs = document.querySelector('.vhs');
 
         try {

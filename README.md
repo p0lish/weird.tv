@@ -24,6 +24,50 @@ Scraping follows the 4chan API rules (max 1 request/second, `If-Modified-Since`)
 first full scrape of a board takes a few minutes. An old `static/videos.json` playlist is
 imported automatically on first start.
 
+## Deploying on a Raspberry Pi
+
+Requirements: 64-bit Raspberry Pi OS, Python 3.11 or newer. This runs it on the home
+network only; there is no tunnel and nothing to forward on the router.
+
+```bash
+git clone https://github.com/p0lish/weird.tv.git /opt/weird-tv
+cd /opt/weird-tv
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+sudo mkdir -p /var/lib/weird-tv && sudo chown "$USER" /var/lib/weird-tv
+cp .env.example .env   # then edit: WEIRDTV_DATA_DIR on the NVMe drive, time zone
+```
+
+**systemd** (`/etc/systemd/system/weird-tv.service`):
+
+```ini
+[Unit]
+Description=Weird TV
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/weird-tv
+EnvironmentFile=/opt/weird-tv/.env
+ExecStart=/opt/weird-tv/.venv/bin/gunicorn -c gunicorn.conf.py wsgi:app
+Restart=on-failure
+User=pi
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now weird-tv
+journalctl -u weird-tv -f
+```
+
+Open `http://<pi-hostname>.local:8088` from any device on the network. To update:
+
+```bash
+cd /opt/weird-tv && git pull && .venv/bin/pip install -r requirements.txt
+sudo systemctl restart weird-tv
+```
+
 ## Storage
 
 Everything lives in the data directory (`./data`, or `/data` in Docker):
@@ -103,7 +147,7 @@ off for visitors whose system asks for reduced motion.
 | `WEIRDTV_QUIET_HOURS` | unset | e.g. `02:00-06:00`: the station goes off air (test card + tone) |
 | `WEIRDTV_TIMEZONE` | `UTC` | time zone for the quiet hours |
 | `WEIRDTV_UPDATE_TOKEN` | unset | enables `POST /___update/` with an `X-Update-Token` header |
-| `HOST` / `PORT` | `127.0.0.1` / `8088` | (`gunicorn.conf.py` binds `0.0.0.0`) |
+| `HOST` / `PORT` | `127.0.0.1` / `8088` | (`gunicorn.conf.py` defaults to `0.0.0.0`) |
 
 The background jobs run inside the web process, so run a single gunicorn worker (the default
 config uses one worker with 32 threads). SQLite runs in WAL mode, so extra processes pointed
