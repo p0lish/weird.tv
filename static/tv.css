@@ -407,3 +407,69 @@ body:hover .download-button,
         display: none
     }
 }
+
+/* black & white set; the power-on keyframes reuse --picture so it stays grey */
+.bw-on {
+    --picture: grayscale(1) contrast(1.15) brightness(1.05)
+}
+
+.bw-on .tv,
+.bw-on .crt {
+    filter: var(--picture)
+}
+
+/* mains hum: a soft dark band drifting down the picture */
+.humbar {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none
+}
+
+.humbar::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -35%;
+    height: 35%;
+    background: linear-gradient(transparent, rgba(0, 0, 0, .2) 45%, rgba(255, 255, 255, .05) 60%, transparent);
+    animation: humbar 7s linear infinite
+}
+
+.humbar-on .humbar {
+    display: block
+}
+
+@keyframes humbar {
+    to {
+        transform: translateY(386%)
+    }
+}
+
+/* the tube warming up */
+.power-on .tv,
+.power-on .crt {
+    animation: power-on .7s ease-out
+}
+
+@keyframes power-on {
+    0% {
+        transform: scale(0, .004);
+        filter: var(--picture, ) brightness(6)
+    }
+
+    30% {
+        transform: scale(1, .004);
+        filter: var(--picture, ) brightness(6)
+    }
+
+    100% {
+        transform: scale(1, 1);
+        filter: var(--picture, ) brightness(1)
+    }
+}

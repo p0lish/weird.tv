@@ -129,6 +129,11 @@ Downvoting a clip also skips it.
 | `v` | VHS overlay (PLAY/LIVE and a camcorder clock) |
 | `z` | static sound |
 | `b` | channel change blip |
+| `w` | black & white set |
+| `a` | bad reception (ghosting, snow, the odd tear) |
+| `y` | vertical hold (the picture rolls now and then) |
+| `r` | hum bar drifting down the picture |
+| `o` | power-on animation when the set starts and on channel change |
 | `e` | all effects off / on |
 
 On touch screens: tap for the next clip, swipe left/right for next/previous, swipe up/down
