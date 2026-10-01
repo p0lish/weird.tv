@@ -340,8 +340,17 @@ body:hover .control,
     }
 }
 
-.download-button[hidden] {
+.control[hidden] {
     display: none
+}
+
+/* the viewer's own vote on this clip */
+.vote-up[aria-pressed="true"] {
+    color: #3f3
+}
+
+.vote-down[aria-pressed="true"] {
+    color: #f33
 }
 
 .menu {
