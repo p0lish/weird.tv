@@ -11,7 +11,8 @@ from flask import (Flask, Response, abort, jsonify, redirect, render_template, r
                    stream_with_context)
 
 from archiver import Archiver
-from channels import load_channels, public_channel
+from cache import MediaCache, full_size
+from channels import NSFW_BOARDS, load_channels, public_channel
 from channer import Channer, read_playlist
 from db import Database
 
@@ -56,13 +57,16 @@ def create_app(config=None):
     app = Flask(__name__)
     data_dir = env("DATA_DIR", os.path.join(BASE_DIR, "data"))
     app.config.update(
-        BOARDS=env("BOARDS", "wsg").split(","),
+        BOARDS=env("BOARDS", "wsg,gif,hc").split(","),
         DATABASE=env("DATABASE", os.path.join(data_dir, "weirdtv.db")),
         ARCHIVE_DIR=env("ARCHIVE_DIR", os.path.join(data_dir, "archive")),
         # a clip is archived once it reaches this score or this many unique views
         ARCHIVE_MIN_SCORE=int(env("ARCHIVE_MIN_SCORE", "2")),
         ARCHIVE_MIN_PLAYS=int(env("ARCHIVE_MIN_PLAYS", "50")),
         ARCHIVE_MAX_MB=int(env("ARCHIVE_MAX_MB", "2048")),
+        # clips streamed from 4chan are kept here so repeat views don't go upstream
+        CACHE_DIR=env("CACHE_DIR", os.path.join(data_dir, "cache")),
+        CACHE_MAX_MB=int(env("CACHE_MAX_MB", "512")),
         CHANNELS_FILE=env("CHANNELS", None),
         # minutes between automatic scrapes/archive runs, 0 disables the background jobs
         REFRESH_MINUTES=float(env("REFRESH_MINUTES", "30")),
@@ -77,18 +81,21 @@ def create_app(config=None):
     app.config.update(config or {})
 
     db = Database(app.config["DATABASE"])
-    channels = load_channels(app.config["CHANNELS_FILE"])
+    channels = load_channels(app.config["CHANNELS_FILE"], boards=app.config["BOARDS"])
     by_slug = {c["slug"]: c for c in channels}
     mix = next(c for c in channels if not c.get("live"))
     channer = Channer(boards=app.config["BOARDS"])
+    cache = MediaCache(app.config["CACHE_DIR"], max_bytes=app.config["CACHE_MAX_MB"] * 1024 ** 2)
     archiver = Archiver(db, app.config["ARCHIVE_DIR"],
                         min_score=app.config["ARCHIVE_MIN_SCORE"],
                         min_plays=app.config["ARCHIVE_MIN_PLAYS"],
-                        max_bytes=app.config["ARCHIVE_MAX_MB"] * 1024 ** 2)
+                        max_bytes=app.config["ARCHIVE_MAX_MB"] * 1024 ** 2,
+                        cache=cache)
     quiet_hours = parse_quiet_hours(app.config["QUIET_HOURS"])
     timezone = ZoneInfo(app.config["TIMEZONE"])
     http = requests.Session()
-    app.extensions["weirdtv"] = {"db": db, "channer": channer, "archiver": archiver, "http": http}
+    app.extensions["weirdtv"] = {"db": db, "channer": channer, "archiver": archiver, "cache": cache,
+                                 "http": http}
 
     if os.path.exists(app.config["LEGACY_PLAYLIST"]):
         imported = db.import_legacy(read_playlist(app.config["LEGACY_PLAYLIST"]))
@@ -99,12 +106,14 @@ def create_app(config=None):
         try:
             channer.update(db)
             db.prune()
+            cache.enforce_limit()
         except Exception:
             log.exception("scrape failed")
 
     def archive():
         try:
             archiver.run()
+            cache.enforce_limit()
         except Exception:
             log.exception("archive run failed")
 
@@ -170,6 +179,7 @@ def create_app(config=None):
             "plays": video.get("plays", 0),
             "duration": video.get("duration"),
             "archived": bool(video.get("archived_path")),
+            "nsfw": video["board"] in NSFW_BOARDS,
             "vote": db.my_vote(video["id"], client),
         }
 
@@ -232,7 +242,7 @@ def create_app(config=None):
     @app.route("/api/videos/<video_id>/vote", methods=["POST"])
     def vote(video_id):
         client = require_client()
-        get_video_or_404(video_id)
+        video_id = get_video_or_404(video_id)["id"]
         value = (request.get_json(silent=True) or {}).get("value")
         if value not in (-1, 0, 1):
             abort(400, "value must be -1, 0 or 1")
@@ -241,12 +251,12 @@ def create_app(config=None):
     @app.route("/api/videos/<video_id>/view", methods=["POST"])
     def view(video_id):
         client = require_client()
-        get_video_or_404(video_id)
+        video_id = get_video_or_404(video_id)["id"]
         return jsonify(plays=db.record_view(video_id, client))
 
     @app.route("/api/videos/<video_id>/duration", methods=["POST"])
     def duration(video_id):
-        get_video_or_404(video_id)
+        video_id = get_video_or_404(video_id)["id"]
         value = (request.get_json(silent=True) or {}).get("duration")
         if not isinstance(value, (int, float)) or not 0.5 <= value <= 3600:
             abort(400, "invalid duration")
@@ -272,6 +282,7 @@ def create_app(config=None):
     def video(video_id):
         # Only serve clips from our own library so this can't be used as an open proxy.
         entry = get_video_or_404(video_id)
+        video_id = entry["id"]
         # ?download=1 asks the browser to save the clip instead of playing it
         download = download_name(entry) if request.args.get("download") else None
         if entry["archived_path"]:
@@ -283,6 +294,11 @@ def create_app(config=None):
             db.unarchive(video_id)
         if entry["gone"]:
             abort(404)
+        cached = cache.get(video_id)
+        if cached:
+            return send_file(cached, mimetype=MIMETYPES.get(os.path.splitext(cached)[1]),
+                             conditional=True, max_age=86400,
+                             as_attachment=bool(download), download_name=download)
         headers = {}
         if "Range" in request.headers:
             headers["Range"] = request.headers["Range"]
@@ -298,10 +314,20 @@ def create_app(config=None):
             upstream.close()
             abort(502)
 
+        # a response with the whole file is copied into the cache as it streams
+        writer = cache.writer(video_id, full_size(upstream.status_code, upstream.headers))
+
         def body():
             try:
-                yield from upstream.iter_content(chunk_size=64 * 1024)
+                for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                    if writer:
+                        writer.write(chunk)
+                    yield chunk
+                if writer:
+                    writer.commit()
             finally:
+                if writer:
+                    writer.abort()
                 upstream.close()
 
         response = Response(stream_with_context(body()), status=upstream.status_code,

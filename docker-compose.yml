@@ -6,7 +6,7 @@ services:
     volumes:
       - weirdtv-data:/data
     environment:
-      WEIRDTV_BOARDS: wsg
+      WEIRDTV_BOARDS: wsg,gif,hc
       # WEIRDTV_UPDATE_TOKEN: change-me
       # WEIRDTV_QUIET_HOURS: "02:00-06:00"
       # WEIRDTV_TIMEZONE: Europe/Budapest

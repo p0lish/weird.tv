@@ -1,4 +1,6 @@
 """Keeps copies of popular clips so they outlive their 4chan threads."""
+import base64
+import hashlib
 import logging
 import os
 import re
@@ -26,8 +28,10 @@ def archive_relpath(video_id):
 
 class Archiver:
     def __init__(self, db, directory, min_score=2, min_plays=50, max_bytes=2 * 1024 ** 3,
-                 max_file_bytes=64 * 1024 ** 2, min_interval=1.0, session=None):
+                 max_file_bytes=64 * 1024 ** 2, min_interval=1.0, session=None, cache=None):
         self.db = db
+        # a MediaCache whose copies are moved into the vault instead of downloading again
+        self.cache = cache
         self.directory = directory
         self.min_score = min_score
         self.min_plays = min_plays
@@ -43,21 +47,27 @@ class Archiver:
         return os.path.join(self.directory, relpath)
 
     def _download(self, video):
+        """Copy a clip into the vault; returns False if 4chan wasn't asked for it."""
         relpath = archive_relpath(video["id"])
         target = self.path(relpath)
         os.makedirs(os.path.dirname(target), exist_ok=True)
+        size = self.cache.take(video["id"], target) if self.cache else None
+        if size is not None:
+            self.db.mark_archived(video["id"], relpath, size)
+            log.info("archived %s from the cache (%d bytes)", video["id"], size)
+            return False
         try:
             resp = self.session.get(video["url"], stream=True, timeout=30)
         except requests.RequestException as exc:
             log.warning("archiving %s failed: %s", video["id"], exc)
-            return
+            return True
         with resp:
             if resp.status_code == 404:
                 self.db.mark_gone(video["id"])
-                return
+                return True
             if resp.status_code != 200:
                 log.warning("archiving %s failed: HTTP %s", video["id"], resp.status_code)
-                return
+                return True
             fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix=".part")
             size = 0
             try:
@@ -72,9 +82,37 @@ class Archiver:
                 log.warning("archiving %s failed: %s", video["id"], exc)
                 if os.path.exists(tmp):
                     os.remove(tmp)
-                return
+                return True
         self.db.mark_archived(video["id"], relpath, size)
         log.info("archived %s (%d bytes)", video["id"], size)
+        return True
+
+    def _backfill_md5(self):
+        """Hash vault files of clips stored before md5s were recorded; copies of
+        the same file are merged and the spare file is removed by _sweep."""
+        for entry in self.db.archived_without_md5():
+            digest = hashlib.md5()
+            try:
+                with open(self.path(entry["archived_path"]), "rb") as f:
+                    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            except OSError:
+                continue
+            kept = self.db.set_md5(entry["id"], base64.b64encode(digest.digest()).decode())
+            if kept != entry["id"]:
+                log.info("merged %s into %s (same file)", entry["id"], kept)
+
+    def _sweep(self):
+        """Delete vault files no clip refers to (left over from merges)."""
+        referenced = self.db.archived_paths()
+        for root, _, names in os.walk(self.directory):
+            for name in names:
+                relpath = os.path.relpath(os.path.join(root, name), self.directory)
+                board = os.path.dirname(relpath)
+                if relpath in referenced or not VIDEO_ID.match("{}-{}".format(board, name)):
+                    continue
+                os.remove(os.path.join(root, name))
+                log.info("removed %s from the vault (no longer used)", relpath)
 
     def _enforce_limit(self):
         archived = self.db.archived_by_rank()
@@ -93,7 +131,9 @@ class Archiver:
     def run(self):
         """Archive every clip that became popular since the last run."""
         with self._lock:
+            self._backfill_md5()
             for video in self.db.archive_candidates(self.min_score, self.min_plays):
-                self._download(video)
-                time.sleep(self.min_interval)
+                if self._download(video):
+                    time.sleep(self.min_interval)
             self._enforce_limit()
+            self._sweep()

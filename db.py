@@ -1,10 +1,14 @@
 """SQLite storage for clips, votes, views, viewers and the live channel."""
+import functools
 import json
 import os
 import random
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
+
+from channels import NSFW_BOARDS
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS videos (
@@ -14,6 +18,7 @@ CREATE TABLE IF NOT EXISTS videos (
     thread INTEGER,
     title TEXT NOT NULL DEFAULT '',
     filename TEXT NOT NULL DEFAULT '',
+    md5 TEXT,
     width INTEGER,
     height INTEGER,
     size INTEGER,
@@ -46,6 +51,11 @@ CREATE TABLE IF NOT EXISTS viewers (
     channel TEXT,
     last_seen INTEGER NOT NULL
 );
+-- ids of clips merged into another copy of the same file, so old links keep working
+CREATE TABLE IF NOT EXISTS aliases (
+    id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -67,8 +77,19 @@ def weight(score):
     return min(6.0, max(0.2, 1.0 + 0.5 * score))
 
 
-def _escape_like(text):
-    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+@functools.lru_cache(maxsize=64)
+def _compile(pattern):
+    return re.compile(pattern, re.IGNORECASE)
+
+
+def _regexp(pattern, text):
+    return text is not None and _compile(pattern).search(text) is not None
+
+
+def keyword_pattern(keywords):
+    """Matches any keyword at the start of a word: "cat" finds "cats" and
+    "funny_cat" but not "scatter"."""
+    return r"(?<![a-z])(?:" + "|".join(re.escape(k) for k in keywords) + ")"
 
 
 class Database:
@@ -80,6 +101,12 @@ class Database:
         try:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(videos)")}
+            if "md5" not in columns:
+                conn.execute("ALTER TABLE videos ADD COLUMN md5 TEXT")
+            # reposts of the same file on a board are one clip
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS videos_md5 ON videos (board, md5)")
+            conn.commit()
         finally:
             conn.close()
 
@@ -87,6 +114,7 @@ class Database:
     def connect(self, immediate=False):
         conn = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         conn.row_factory = sqlite3.Row
+        conn.create_function("REGEXP", 2, _regexp, deterministic=True)
         try:
             conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
             yield conn
@@ -100,37 +128,111 @@ class Database:
 
     # --- scraping -----------------------------------------------------------
 
-    def sync_board(self, board, videos, now=None, mark_missing=True):
-        """Upsert clips seen on `board`; with `mark_missing`, `videos` is the whole
-        board and every other clip of it is marked as gone."""
+    def save_videos(self, videos, now=None):
+        """Upsert clips seen on 4chan and return the id each one is stored under.
+
+        A repost of a file already on the board (same md5) updates the existing
+        clip instead of adding a copy, merging the two if both were stored."""
         now = int(now or time.time())
+        ids = []
         with self.connect(immediate=True) as conn:
             for v in videos:
-                conn.execute(
-                    """INSERT INTO videos (id, url, board, thread, title, filename, width, height, size,
-                                           first_seen, last_seen, gone)
-                       VALUES (:id, :url, :board, :thread, :title, :filename, :width, :height, :size,
-                               :now, :now, 0)
-                       ON CONFLICT (id) DO UPDATE SET
-                           url = excluded.url, thread = excluded.thread, title = excluded.title,
-                           filename = excluded.filename, last_seen = excluded.last_seen, gone = 0""",
-                    dict({"width": None, "height": None, "size": None, "thread": None}, **v, now=now))
-            if videos and mark_missing:
-                seen = {v["id"] for v in videos}
-                known = [r[0] for r in conn.execute("SELECT id FROM videos WHERE board = ? AND gone = 0", (board,))]
-                conn.executemany("UPDATE videos SET gone = 1 WHERE id = ?",
-                                 [(video_id,) for video_id in known if video_id not in seen])
+                v = dict({"width": None, "height": None, "size": None, "thread": None, "md5": None}, **v, now=now)
+                stored = self._resolve(conn, v["id"])
+                same_file = None
+                if v["md5"]:
+                    row = conn.execute("SELECT id FROM videos WHERE board = ? AND md5 = ?",
+                                       (v["board"], v["md5"])).fetchone()
+                    same_file = row and row[0]
+                if same_file and stored and stored != same_file:
+                    self._merge(conn, same_file, stored)
+                target = same_file or stored
+                if target:
+                    conn.execute(
+                        """UPDATE videos SET url = :url, thread = :thread, title = :title, filename = :filename,
+                                             width = :width, height = :height, size = :size,
+                                             md5 = COALESCE(:md5, md5), last_seen = :now, gone = 0
+                           WHERE id = :target""", dict(v, target=target))
+                else:
+                    target = v["id"]
+                    conn.execute(
+                        """INSERT INTO videos (id, url, board, thread, title, filename, md5, width, height, size,
+                                               first_seen, last_seen, gone)
+                           VALUES (:id, :url, :board, :thread, :title, :filename, :md5, :width, :height, :size,
+                                   :now, :now, 0)""", v)
+                ids.append(target)
+        return ids
+
+    def mark_missing(self, board, seen):
+        """Mark every clip of `board` that isn't in `seen` (the whole board) as gone."""
+        if not seen:
+            return
+        with self.connect(immediate=True) as conn:
+            seen = {self._resolve(conn, video_id) for video_id in seen}
+            known = [r[0] for r in conn.execute("SELECT id FROM videos WHERE board = ? AND gone = 0", (board,))]
+            conn.executemany("UPDATE videos SET gone = 1 WHERE id = ?",
+                             [(video_id,) for video_id in known if video_id not in seen])
+
+    def set_md5(self, video_id, md5):
+        """Record a clip's md5, merging it into another clip of the board with the
+        same file. Returns the id the clip now lives under."""
+        with self.connect(immediate=True) as conn:
+            row = conn.execute("SELECT board FROM videos WHERE id = ?", (video_id,)).fetchone()
+            if row is None:
+                return None
+            other = conn.execute("SELECT id FROM videos WHERE board = ? AND md5 = ? AND id != ?",
+                                 (row[0], md5, video_id)).fetchone()
+            if other:
+                self._merge(conn, other[0], video_id)
+                return other[0]
+            conn.execute("UPDATE videos SET md5 = ? WHERE id = ?", (md5, video_id))
+            return video_id
+
+    @staticmethod
+    def _resolve(conn, video_id):
+        """The id a clip is stored under (following merges), or None."""
+        if conn.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone():
+            return video_id
+        row = conn.execute("SELECT video_id FROM aliases WHERE id = ?", (video_id,)).fetchone()
+        return row[0] if row else None
+
+    @staticmethod
+    def _merge(conn, keep, dup):
+        """Fold clip `dup` into `keep`: votes, views, the vault copy and its links.
+        A vault file left without a clip is cleaned up by the archiver."""
+        k = conn.execute("SELECT * FROM videos WHERE id = ?", (keep,)).fetchone()
+        d = conn.execute("SELECT * FROM videos WHERE id = ?", (dup,)).fetchone()
+        conn.execute("""INSERT OR IGNORE INTO votes (video_id, client, value, created)
+                        SELECT ?, client, value, created FROM votes WHERE video_id = ?""", (keep, dup))
+        moved_views = conn.execute("""INSERT OR IGNORE INTO views (video_id, client, created)
+                                      SELECT ?, client, created FROM views WHERE video_id = ?""", (keep, dup)).rowcount
+        conn.execute("DELETE FROM votes WHERE video_id = ?", (dup,))
+        conn.execute("DELETE FROM views WHERE video_id = ?", (dup,))
+        fields = {
+            "score": conn.execute("SELECT COALESCE(SUM(value), 0) FROM votes WHERE video_id = ?", (keep,)).fetchone()[0],
+            "plays": k["plays"] + moved_views,
+            "duration": k["duration"] or d["duration"],
+            "first_seen": min(k["first_seen"], d["first_seen"]),
+            "last_seen": max(k["last_seen"], d["last_seen"]),
+            "gone": k["gone"] and d["gone"],
+        }
+        if k["gone"] and not d["gone"]:
+            # the duplicate is the copy that is still up
+            fields.update({f: d[f] for f in ("url", "thread", "title", "filename")})
+        if k["archived_path"] is None and d["archived_path"] is not None:
+            fields.update({f: d[f] for f in ("archived_path", "archived_bytes", "archived_at")})
+        conn.execute("UPDATE videos SET " + ", ".join(f + " = :" + f for f in fields) + " WHERE id = :id",
+                     dict(fields, id=keep))
+        conn.execute("DELETE FROM videos WHERE id = ?", (dup,))
+        conn.execute("UPDATE aliases SET video_id = ? WHERE video_id = ?", (keep, dup))
+        conn.execute("INSERT OR REPLACE INTO aliases (id, video_id) VALUES (?, ?)", (dup, keep))
 
     def import_legacy(self, videos):
         """One-off import of the old videos.json playlist into an empty database."""
         with self.connect(immediate=True) as conn:
             if conn.execute("SELECT 1 FROM videos LIMIT 1").fetchone():
                 return 0
-        by_board = {}
-        for v in videos:
-            by_board.setdefault(v["board"], []).append(v)
-        for board, items in by_board.items():
-            self.sync_board(board, items)
+        self.save_videos(videos)
         return len(videos)
 
     def mark_gone(self, video_id):
@@ -145,28 +247,31 @@ class Database:
             conn.execute("DELETE FROM votes WHERE video_id IN (%s)" % stale, (now - FORGET_AFTER,))
             conn.execute("DELETE FROM views WHERE video_id IN (%s)" % stale, (now - FORGET_AFTER,))
             conn.execute("DELETE FROM videos WHERE id IN (%s)" % stale, (now - FORGET_AFTER,))
+            conn.execute("DELETE FROM aliases WHERE video_id NOT IN (SELECT id FROM videos)")
             conn.execute("DELETE FROM viewers WHERE last_seen < ?", (now - 24 * 3600,))
 
     # --- reading ------------------------------------------------------------
 
     def get(self, video_id):
+        """A clip by id, following merges into another copy of the same file."""
         with self.connect() as conn:
-            row = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+            row = conn.execute("SELECT * FROM videos WHERE id = ?", (self._resolve(conn, video_id),)).fetchone()
         return dict(row) if row else None
 
     def _channel_where(self, channel, now):
         where = ["(gone = 0 OR archived_path IS NOT NULL)", "score > ?"]
         params = [HIDE_SCORE]
-        if channel.get("boards"):
-            where.append("board IN (%s)" % ",".join("?" * len(channel["boards"])))
-            params += channel["boards"]
+        boards = channel.get("boards") or ()
+        if not boards and not channel.get("nsfw"):
+            where.append("board NOT IN (%s)" % ",".join("?" * len(NSFW_BOARDS)))
+            params += NSFW_BOARDS
+        if boards:
+            where.append("board IN (%s)" % ",".join("?" * len(boards)))
+            params += boards
         if channel.get("keywords"):
-            clauses = []
-            for keyword in channel["keywords"]:
-                pattern = "%" + _escape_like(keyword) + "%"
-                clauses.append("title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\'")
-                params += [pattern, pattern]
-            where.append("(" + " OR ".join(clauses) + ")")
+            pattern = keyword_pattern(channel["keywords"])
+            where.append("(title REGEXP ? OR filename REGEXP ?)")
+            params += [pattern, pattern]
         kind = channel.get("filter")
         if kind == "top":
             where.append("score >= 1")
@@ -182,15 +287,16 @@ class Database:
         where, params = self._channel_where(channel, now or time.time())
         with self.connect() as conn:
             rows = conn.execute("SELECT id, score FROM videos WHERE " + where, params).fetchall()
-        if not rows:
-            return None
-        exclude = set(exclude)
-        fresh = [r for r in rows if r["id"] not in exclude] or rows
-        chosen = rng.choices(fresh, weights=[weight(r["score"]) for r in fresh])[0]
-        return self.get(chosen["id"])
+            if not rows:
+                return None
+            exclude = set(exclude)
+            fresh = [r for r in rows if r["id"] not in exclude] or rows
+            chosen = rng.choices(fresh, weights=[weight(r["score"]) for r in fresh])[0]
+            return dict(conn.execute("SELECT * FROM videos WHERE id = ?", (chosen["id"],)).fetchone())
 
     def count(self, channel=None):
-        where, params = self._channel_where(channel or {}, time.time())
+        """Clips airing on `channel`, or in the whole library (NSFW boards included)."""
+        where, params = self._channel_where(channel if channel is not None else {"nsfw": True}, time.time())
         with self.connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM videos WHERE " + where, params).fetchone()[0]
 
@@ -317,6 +423,15 @@ class Database:
         with self.connect() as conn:
             conn.execute("UPDATE videos SET archived_path = NULL, archived_bytes = NULL, archived_at = NULL "
                          "WHERE id = ?", (video_id,))
+
+    def archived_without_md5(self):
+        with self.connect() as conn:
+            rows = conn.execute("SELECT id, archived_path FROM videos WHERE archived_path IS NOT NULL AND md5 IS NULL")
+            return [dict(r) for r in rows]
+
+    def archived_paths(self):
+        with self.connect() as conn:
+            return {r[0] for r in conn.execute("SELECT archived_path FROM videos WHERE archived_path IS NOT NULL")}
 
     def archived_by_rank(self):
         """Archived clips, least popular first (eviction order)."""

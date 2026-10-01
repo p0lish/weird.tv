@@ -77,8 +77,13 @@ Everything lives in the data directory (`./data`, or `/data` in Docker):
   it reaches `WEIRDTV_ARCHIVE_MIN_SCORE` votes or `WEIRDTV_ARCHIVE_MIN_PLAYS` unique views, and keeps
   playing after 4chan deletes its thread. When the vault is over `WEIRDTV_ARCHIVE_MAX_MB`, the least
   popular clips are evicted first.
+- `cache/<board>/<file>`: clips streamed from 4chan, so a clip many people watch (LIVE above all)
+  is downloaded once. The least recently watched clips are dropped beyond `WEIRDTV_CACHE_MAX_MB`,
+  and a cached clip that gets archived is moved into the vault instead of downloaded again.
 
-Clips whose thread died and that weren't archived are forgotten after a week.
+Reposts of the same file on a board (same md5) are one clip: votes and views add up, and the
+clip keeps airing as long as any copy is up. Clips whose thread died and that weren't archived
+are forgotten after a week. The scraper only refetches threads that changed since the last scrape.
 
 ## Channels
 
@@ -93,8 +98,11 @@ Clips whose thread died and that weren't archived are forgotten after a week.
 | 6 | TOP RATED | upvoted clips |
 | 7 | FRESH | clips found in the last 24 hours |
 | 8 | THE VAULT | archived clips |
+| 9 | ADULT 18+ | /gif/ and /hc/, explicit; the player asks viewers to confirm they're 18+ first |
 
-Channels match keywords in the thread title and file name. Define your own with a JSON file
+Channels match keywords at the start of a word in the thread title and file name. Channels that
+don't name their `boards` never show NSFW boards (`NSFW_BOARDS` in `channels.py`) unless they're
+marked `"nsfw": true`, and channels whose boards aren't scraped are hidden. Define your own with a JSON file
 (same shape as `DEFAULT_CHANNELS` in `channels.py`, numbers 1-9) and point
 `WEIRDTV_CHANNELS` at it.
 
@@ -134,13 +142,15 @@ off for visitors whose system asks for reduced motion.
 
 | Variable | Default | |
 | --- | --- | --- |
-| `WEIRDTV_BOARDS` | `wsg` | comma-separated boards to scrape |
+| `WEIRDTV_BOARDS` | `wsg,gif,hc` | comma-separated boards to scrape (drop `gif,hc` to turn the adult channel off) |
 | `WEIRDTV_DATA_DIR` | `./data` | where the database and vault live |
 | `WEIRDTV_DATABASE` | `<data>/weirdtv.db` | |
 | `WEIRDTV_ARCHIVE_DIR` | `<data>/archive` | the vault folder |
 | `WEIRDTV_ARCHIVE_MIN_SCORE` | `2` | votes needed to archive a clip |
 | `WEIRDTV_ARCHIVE_MIN_PLAYS` | `50` | unique views needed to archive a clip |
 | `WEIRDTV_ARCHIVE_MAX_MB` | `2048` | vault size limit |
+| `WEIRDTV_CACHE_DIR` | `<data>/cache` | cache of streamed clips |
+| `WEIRDTV_CACHE_MAX_MB` | `512` | cache size limit, `0` disables the cache |
 | `WEIRDTV_CHANNELS` | unset | JSON file with custom channels |
 | `WEIRDTV_REFRESH_MINUTES` | `30` | minutes between scrapes, `0` disables the scraper |
 | `WEIRDTV_ARCHIVE_MINUTES` | `5` | minutes between vault runs, `0` disables the archiver |

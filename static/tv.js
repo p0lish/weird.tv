@@ -2,7 +2,9 @@ const TV = (() => {
     const TESTCARD_URL = '/static/testcard.png';
     const STATIC_SOUND = 'st';
     // skip a video if it hasn't started playing after this long
-    const LOAD_TIMEOUT_MS = 15000;
+    const LOAD_TIMEOUT_MS = 8000;
+    // skip a video that stops mid-play to buffer for this long
+    const STALL_TIMEOUT_MS = 8000;
     // how long the channel info stays on screen
     const OSD_MS = 4000;
     // hold the static for a moment on every change, like a real TV
@@ -15,7 +17,7 @@ const TV = (() => {
     const HISTORY_SIZE = 50;
     const MAX_CANVAS_WIDTH = 1920;
     const SWIPE_PX = 50;
-    const STORAGE = { effects: 'weirdtv.effects', channel: 'weirdtv.channel', client: 'weirdtv.client' };
+    const STORAGE = { effects: 'weirdtv.effects', channel: 'weirdtv.channel', client: 'weirdtv.client', adult: 'weirdtv.adult' };
     // toggleable visual/audio effects and the key that toggles each one
     const EFFECTS = {
         scanlines: { key: 's', label: 'SCANLINES' },
@@ -31,7 +33,7 @@ const TV = (() => {
     let testcardImage, testcardCanvas, testcardContext, tempCanvas, tempContext;
     let testcardMod = 0, pixelOffset1 = 1, pixelOffset2 = 1, blockOffset = 2;
     let drawRect = { x: 0, y: 0, w: 0, h: 0 };
-    let videoLoading = true, loadTimeoutID, osdTimeoutID, playTimeoutID, retryTimeoutID, liveSyncID;
+    let videoLoading = true, loadTimeoutID, stallTimeoutID, osdTimeoutID, playTimeoutID, retryTimeoutID, liveSyncID;
     let audioContext, audio = {};
     let muted = false;
     let channels = [], channel = 'mix';
@@ -407,6 +409,14 @@ const TV = (() => {
                 skipBroken();
             }
         });
+        // a clip that froze to buffer gets a few seconds to recover before it's skipped
+        el.addEventListener('waiting', () => {
+            if (el === video && !videoLoading && !offair) {
+                clearTimeout(stallTimeoutID);
+                stallTimeoutID = setTimeout(skipBroken, STALL_TIMEOUT_MS);
+            }
+        });
+        el.addEventListener('playing', () => clearTimeout(stallTimeoutID));
         el.addEventListener('ended', () => {
             if (el !== video) {
                 return;
@@ -457,6 +467,7 @@ const TV = (() => {
 
     function tune(item) {
         clearTimeout(loadTimeoutID);
+        clearTimeout(stallTimeoutID);
         clearTimeout(playTimeoutID);
         clearTimeout(retryTimeoutID);
         setOffAir(null);
@@ -496,11 +507,18 @@ const TV = (() => {
     }
 
     function skipBroken() {
+        clearTimeout(loadTimeoutID);
+        clearTimeout(stallTimeoutID);
         if (isLive()) {
             retryTimeoutID = setTimeout(tuneLive, 2000);
-        } else {
-            nextClip();
+            return;
         }
+        // forget the broken clip so going back doesn't land on it again
+        if (cursor >= 0) {
+            history.splice(cursor, 1);
+            cursor--;
+        }
+        nextClip();
     }
 
     async function nextClip() {
@@ -607,6 +625,7 @@ const TV = (() => {
         offairEl.textContent = message || '';
         document.body.classList.toggle('offair', !!message);
         if (message) {
+            clearTimeout(stallTimeoutID);
             updateDownload(null);
         }
         renderVHS();
@@ -628,9 +647,21 @@ const TV = (() => {
 
     // --- channels & live -------------------------------------------------
 
+    // NSFW channels stay locked until the viewer confirms they're an adult
+    function allowed(c) {
+        return !c.nsfw || storageGet(STORAGE.adult) === '1';
+    }
+
     function setChannel(slug) {
-        if (!channels.some((c) => c.slug === slug)) {
+        const target = channels.find((c) => c.slug === slug);
+        if (!target) {
             return;
+        }
+        if (!allowed(target)) {
+            if (!window.confirm(target.name + ' shows explicit adult content. Are you 18 or older?')) {
+                return;
+            }
+            storageSet(STORAGE.adult, '1');
         }
         playBlip();
         if (slug === channel && !offair) {
@@ -654,8 +685,10 @@ const TV = (() => {
     }
 
     function stepChannel(step) {
-        const index = channels.findIndex((c) => c.slug === channel);
-        const next = channels[(index + step + channels.length) % channels.length];
+        // channel surfing skips locked channels, they have to be tuned on purpose
+        const surfable = channels.filter((c) => allowed(c) || c.slug === channel);
+        const index = surfable.findIndex((c) => c.slug === channel);
+        const next = surfable[(index + step + surfable.length) % surfable.length];
         if (next) {
             setChannel(next.slug);
         }
@@ -1068,9 +1101,16 @@ const TV = (() => {
         setInterval(renderVHS, 1000);
 
         await loadChannels();
-        const initial = window.WEIRDTV_INITIAL;
+        let initial = window.WEIRDTV_INITIAL;
+        if (initial && !allowed(initial)) {
+            if (window.confirm('This clip is explicit adult content. Are you 18 or older?')) {
+                storageSet(STORAGE.adult, '1');
+            } else {
+                initial = null;
+            }
+        }
         const saved = storageGet(STORAGE.channel);
-        channel = !initial && channels.some((c) => c.slug === saved) ? saved
+        channel = !initial && channels.some((c) => c.slug === saved && allowed(c)) ? saved
             : (channels.find((c) => !c.live) || channels[0]).slug;
         applyEffects();
         heartbeat();

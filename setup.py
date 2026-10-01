@@ -6,6 +6,6 @@ setup(name='Weird.TV',
       author='Polish',
       author_email='polish1987@gmail.com',
       url='https://github.com/p0lish/weird.tv',
-      py_modules=['app', 'archiver', 'channels', 'channer', 'db', 'wsgi'],
+      py_modules=['app', 'archiver', 'cache', 'channels', 'channer', 'db', 'wsgi'],
       install_requires=['Flask>=3.0', 'requests>=2.32', 'gunicorn>=23'],
       )
