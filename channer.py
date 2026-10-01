@@ -2,6 +2,8 @@
 
 API rules (https://github.com/4chan/4chan-API): max one request per second,
 use If-Modified-Since, and don't refetch a thread more than once per 10s.
+Threads whose `last_modified` in threads.json hasn't changed since the last
+scrape aren't fetched at all.
 """
 import json
 import logging
@@ -26,15 +28,18 @@ class Channer:
         self.session = session or requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
         self._last_request = 0.0
-        # url -> (last_modified header, parsed json), survives between updates
+        # board index url -> (Last-Modified header, parsed json)
         self._cache = {}
+        # board -> {thread number: (last_modified, ids of the thread's clips)}
+        self._threads = {}
         self._lock = threading.Lock()
         # progress of the current scrape, shown to viewers while the library is empty
         self.status = {"scanning": False, "board": None, "done": 0, "total": 0,
                        "error": None, "finished": None}
 
-    def _get_json(self, url):
-        """GET a JSON document, honouring rate limits and If-Modified-Since.
+    def _get_json(self, url, cache=True):
+        """GET a JSON document, honouring rate limits and If-Modified-Since
+        (for documents fetched with `cache`).
 
         Returns the parsed JSON, or None if the request failed.
         """
@@ -65,7 +70,7 @@ class Channer:
         except ValueError:
             log.warning("invalid JSON from %s", url)
             return None
-        if "Last-Modified" in resp.headers:
+        if cache and "Last-Modified" in resp.headers:
             self._cache[url] = (resp.headers["Last-Modified"], data)
         return data
 
@@ -81,37 +86,42 @@ class Channer:
             "thread": thread["no"],
             "title": thread.get("sub") or post.get("filename", ""),
             "filename": post.get("filename", "") + ext,
+            "md5": post.get("md5"),
             "width": post.get("w"),
             "height": post.get("h"),
             "size": post.get("fsize"),
         }
 
-    def scrape_board(self, board, on_thread=None):
-        """Return every video currently posted on `board`, or None if the board
-        index couldn't be fetched (so callers don't mistake an outage for an
-        empty board). `on_thread(videos)` is called as each thread is read."""
-        threads = self._get_json("{}/{}/threads.json".format(API_URL, board))
-        if threads is None:
+    def scrape_board(self, board, save):
+        """Return the ids of every clip currently posted on `board`, or None if
+        the board index couldn't be fetched (so callers don't mistake an outage
+        for an empty board). Each changed thread's clips are passed to
+        `save(videos)` as it is read, which returns the ids they're stored under."""
+        index = self._get_json("{}/{}/threads.json".format(API_URL, board))
+        if index is None:
             return None
-        numbers = [t["no"] for page in threads for t in page.get("threads", [])]
-        self.status.update(board=board, done=0, total=len(numbers))
-        videos = []
-        for number in numbers:
-            data = self._get_json("{}/{}/thread/{}.json".format(API_URL, board, number))
+        threads = [(t["no"], t.get("last_modified")) for page in index for t in page.get("threads", [])]
+        self.status.update(board=board, done=0, total=len(threads))
+        known = self._threads.get(board, {})
+        current = {}
+        for number, modified in threads:
+            previous = known.get(number)
+            if previous and modified is not None and previous[0] == modified:
+                current[number] = previous
+                self.status["done"] += 1
+                continue
+            data = self._get_json("{}/{}/thread/{}.json".format(API_URL, board, number), cache=False)
             self.status["done"] += 1
             if not data or not data.get("posts"):
+                if previous:
+                    # couldn't read it this time: keep its clips, retry next scrape
+                    current[number] = (None, previous[1])
                 continue
             op = data["posts"][0]
             found = [v for v in (self._video_from_post(board, op, post) for post in data["posts"]) if v]
-            videos.extend(found)
-            if found and on_thread:
-                on_thread(found)
-        # drop cache entries of threads that have since been archived/pruned
-        live = {"{}/{}/thread/{}.json".format(API_URL, board, number) for number in numbers}
-        prefix = "{}/{}/thread/".format(API_URL, board)
-        for url in [u for u in self._cache if u.startswith(prefix) and u not in live]:
-            del self._cache[url]
-        return videos
+            current[number] = (modified, save(found) if found else [])
+        self._threads[board] = current
+        return [video_id for _, ids in current.values() for video_id in ids]
 
     def update(self, db):
         """Scrape all boards into the database. Concurrent calls are serialized.
@@ -123,17 +133,15 @@ class Channer:
             found = 0
             try:
                 for board in self.boards:
-                    # save clips thread by thread so a fresh install has something to
-                    # show within seconds instead of after the whole board is read
-                    videos = self.scrape_board(
-                        board, on_thread=lambda vids, board=board: db.sync_board(board, vids, mark_missing=False))
-                    if videos is None:
+                    # clips are saved thread by thread so a fresh install has something
+                    # to show within seconds instead of after the whole board is read
+                    ids = self.scrape_board(board, db.save_videos)
+                    if ids is None:
                         log.warning("couldn't fetch /%s/, keeping its clips as they are", board)
                         continue
-                    unique = list({v["id"]: v for v in videos}.values())
-                    db.sync_board(board, unique)
-                    found += len(unique)
-                    log.info("/%s/: %d videos", board, len(unique))
+                    db.mark_missing(board, ids)
+                    found += len(set(ids))
+                    log.info("/%s/: %d videos", board, len(set(ids)))
             finally:
                 self.status.update(scanning=False, finished=time.time())
             return found

@@ -1,5 +1,6 @@
 import datetime
 import json
+import os
 import random
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 import app as app_module
 from app import create_app, off_air_until, parse_quiet_hours
 from archiver import Archiver, archive_relpath
+from cache import MediaCache
 from channels import DEFAULT_CHANNELS, load_channels
 from channer import Channer
 from db import Database
@@ -49,14 +51,14 @@ class FakeSession:
         return self.routes.get(url, FakeResponse(404))
 
 
-THREADS = [{"page": 1, "threads": [{"no": 1}, {"no": 2}]}]
+THREADS = [{"page": 1, "threads": [{"no": 1, "last_modified": 10}, {"no": 2, "last_modified": 20}]}]
 THREAD_1 = {"posts": [
-    {"no": 1, "sub": "YLYL thread", "tim": 111, "ext": ".webm", "filename": "a"},
-    {"no": 3, "tim": 112, "ext": ".jpg", "filename": "b"},
-    {"no": 4, "tim": 113, "ext": ".mp4", "filename": "c"},
+    {"no": 1, "sub": "YLYL thread", "tim": 111, "ext": ".webm", "filename": "a", "md5": "md5-a"},
+    {"no": 3, "tim": 112, "ext": ".jpg", "filename": "b", "md5": "md5-b"},
+    {"no": 4, "tim": 113, "ext": ".mp4", "filename": "c", "md5": "md5-c"},
 ]}
 THREAD_2 = {"posts": [
-    {"no": 2, "sub": "Cat thread", "tim": 211, "ext": ".webm", "filename": "d"},
+    {"no": 2, "sub": "Cat thread", "tim": 211, "ext": ".webm", "filename": "d", "md5": "md5-d"},
     {"no": 5, "tim": 212, "ext": ".webm", "filename": "e", "filedeleted": 1},
 ]}
 
@@ -89,10 +91,67 @@ def test_channer_collects_videos(tmp_path):
     assert video["url"] == "https://i.4cdn.org/wsg/111.webm"
     assert video["thread"] == 1
 
-    # second run sends If-Modified-Since and reuses cached data on 304
-    session.routes["https://a.4cdn.org/wsg/thread/1.json"] = FakeResponse(304)
+    # second run: the index is revalidated, unchanged threads aren't fetched at all
+    session.calls.clear()
+    session.routes["https://a.4cdn.org/wsg/threads.json"] = FakeResponse(304)
     assert channer.update(database) == 3
-    assert ("https://a.4cdn.org/wsg/thread/1.json", {"If-Modified-Since": "y"}) in session.calls
+    assert session.calls == [("https://a.4cdn.org/wsg/threads.json", {"If-Modified-Since": "x"})]
+    assert database.get("wsg-111.webm")["gone"] == 0
+
+
+def test_only_changed_threads_are_refetched(tmp_path):
+    database = Database(str(tmp_path / "test.db"))
+    session = FakeSession(api_routes())
+    channer = Channer(min_interval=0, session=session)
+    channer.update(database)
+    session.calls.clear()
+    session.routes["https://a.4cdn.org/wsg/threads.json"] = FakeResponse(
+        200, [{"threads": [{"no": 1, "last_modified": 11}, {"no": 2, "last_modified": 20}]}])
+    session.routes["https://a.4cdn.org/wsg/thread/1.json"] = FakeResponse(200, {"posts": THREAD_1["posts"][:1]})
+    channer.update(database)
+    assert [url for url, _ in session.calls] == ["https://a.4cdn.org/wsg/threads.json",
+                                                 "https://a.4cdn.org/wsg/thread/1.json"]
+    # 113 left thread 1; thread 2 wasn't refetched but its clip is still up
+    assert database.get("wsg-113.mp4")["gone"] == 1
+    assert database.get("wsg-211.webm")["gone"] == 0
+
+
+def test_reposts_are_one_clip(tmp_path):
+    database = Database(str(tmp_path / "test.db"))
+    routes = api_routes()
+    routes["https://a.4cdn.org/wsg/thread/2.json"] = FakeResponse(200, {"posts": [
+        {"no": 2, "sub": "Cat thread", "tim": 211, "ext": ".webm", "filename": "d", "md5": "md5-d"},
+        {"no": 6, "tim": 311, "ext": ".webm", "filename": "a again", "md5": "md5-a"},
+    ]})
+    assert Channer(min_interval=0, session=FakeSession(routes)).update(database) == 3
+    assert database.count() == 3
+    assert database.get("wsg-311.webm") is None
+
+    # the first copy's thread dies: the clip lives on through the repost
+    routes["https://a.4cdn.org/wsg/threads.json"] = FakeResponse(200, [{"threads": [{"no": 2}]}])
+    Channer(min_interval=0, session=FakeSession(routes)).update(database)
+    clip = database.get("wsg-111.webm")
+    assert clip["gone"] == 0 and clip["thread"] == 2 and clip["url"].endswith("/311.webm")
+
+
+def test_old_duplicates_are_merged(tmp_path):
+    database = Database(str(tmp_path / "test.db"))
+    # stored before md5s were recorded
+    database.save_videos([{"id": "wsg-1.webm", "url": "u1", "board": "wsg", "title": "", "filename": "x"},
+                          {"id": "wsg-2.webm", "url": "u2", "board": "wsg", "title": "", "filename": "x"}])
+    database.vote("wsg-1.webm", "a", 1)
+    database.vote("wsg-2.webm", "a", 1)
+    database.vote("wsg-2.webm", "b", 1)
+    database.record_view("wsg-2.webm", "a")
+    database.mark_archived("wsg-2.webm", "wsg/2.webm", 10)
+    database.save_videos([{"id": "wsg-1.webm", "url": "u1", "board": "wsg", "title": "", "filename": "x",
+                           "md5": "same"}])
+    assert database.save_videos([{"id": "wsg-2.webm", "url": "u2", "board": "wsg", "title": "",
+                                  "filename": "x", "md5": "same"}]) == ["wsg-1.webm"]
+    clip = database.get("wsg-2.webm")
+    assert clip["id"] == "wsg-1.webm"
+    assert clip["score"] == 2 and clip["plays"] == 1 and clip["archived_path"] == "wsg/2.webm"
+    assert database.count() == 1
 
 
 def test_dead_threads_are_marked_gone(db):
@@ -130,6 +189,28 @@ def test_board_outage_keeps_clips(db):
 
 
 # --- database ------------------------------------------------------------
+
+def test_keywords_match_word_starts(db):
+    music = {"slug": "music", "keywords": ["ear"]}
+    db.save_videos([{"id": "wsg-7.webm", "url": "u", "board": "wsg", "title": "best of the year", "filename": "y"}])
+    assert db.pick(music) is None
+    db.save_videos([{"id": "wsg-8.webm", "url": "u", "board": "wsg", "title": "", "filename": "EARRAPE_remix"}])
+    assert db.pick(music)["id"] == "wsg-8.webm"
+
+
+def test_nsfw_boards_stay_on_their_channel(db):
+    adult = next(c for c in DEFAULT_CHANNELS if c["slug"] == "adult")
+    db.save_videos([{"id": "hc-9.webm", "url": "u", "board": "hc", "title": "cat", "filename": "z"}])
+    assert "hc-9.webm" not in {db.pick(MIX)["id"] for _ in range(50)}
+    assert db.pick({"slug": "animals", "keywords": ["cat"]})["id"] == "wsg-211.webm"
+    assert db.pick(adult)["id"] == "hc-9.webm"
+    assert db.count() == 4
+
+
+def test_channels_for_unscraped_boards_are_hidden():
+    assert "adult" not in [c["slug"] for c in load_channels(boards=["wsg"])]
+    assert "adult" in [c["slug"] for c in load_channels(boards=["wsg", "gif"])]
+
 
 def test_pick_respects_keywords_and_exclude(db):
     ylyl = next(c for c in DEFAULT_CHANNELS if c["slug"] == "ylyl")
@@ -216,6 +297,41 @@ def test_archiver_keeps_popular_clips(db, tmp_path):
     assert db.get("wsg-211.webm")["gone"] == 1
 
 
+def test_archiver_moves_cached_clips_and_merges_copies(db, tmp_path):
+    cache = MediaCache(str(tmp_path / "cache"))
+    (tmp_path / "cache" / "wsg").mkdir(parents=True)
+    (tmp_path / "cache" / "wsg" / "111.webm").write_bytes(b"x" * 10)
+    archiver = Archiver(db, str(tmp_path / "archive"), min_score=1, min_interval=0,
+                        session=FakeSession({}), cache=cache)
+    db.vote("wsg-111.webm", "a", 1)
+    archiver.run()
+    assert db.get("wsg-111.webm")["archived_path"] == "wsg/111.webm"
+    assert not (tmp_path / "cache" / "wsg" / "111.webm").exists()
+
+    # two vault copies of one file from before md5s were stored: one is merged away
+    vault = tmp_path / "archive" / "wsg"
+    db.save_videos([{"id": "wsg-5.webm", "url": "u", "board": "wsg", "title": "", "filename": "f"},
+                    {"id": "wsg-6.webm", "url": "u", "board": "wsg", "title": "", "filename": "f"}])
+    for name in ("5", "6"):
+        (vault / (name + ".webm")).write_bytes(b"same")
+        db.mark_archived("wsg-" + name + ".webm", "wsg/" + name + ".webm", 4)
+    archiver.run()
+    assert db.get("wsg-6.webm")["id"] == "wsg-5.webm"
+    assert sorted(p.name for p in vault.iterdir()) == ["111.webm", "5.webm"]
+
+
+def test_cache_evicts_least_recently_watched(tmp_path):
+    cache = MediaCache(str(tmp_path / "cache"), max_bytes=15)
+    for name in ("1", "2"):
+        path = tmp_path / "cache" / "wsg" / (name + ".webm")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x" * 10)
+    cache.get("wsg-1.webm")
+    os.utime(cache.path("wsg-2.webm"), (0, 0))
+    cache.enforce_limit()
+    assert cache.get("wsg-1.webm") and not cache.get("wsg-2.webm")
+
+
 def test_archive_paths_are_sanitized():
     assert archive_relpath("wsg-123.webm") == "wsg/123.webm"
     with pytest.raises(ValueError):
@@ -226,6 +342,7 @@ def test_archive_paths_are_sanitized():
 
 def make_app(tmp_path, **config):
     base = {"DATABASE": str(tmp_path / "test.db"), "ARCHIVE_DIR": str(tmp_path / "archive"),
+            "CACHE_DIR": str(tmp_path / "cache"),
             "REFRESH_MINUTES": 0, "ARCHIVE_MINUTES": 0, "UPDATE_TOKEN": "secret",
             "LEGACY_PLAYLIST": str(tmp_path / "none.json")}
     base.update(config)
@@ -286,6 +403,28 @@ def test_video_proxy_only_serves_library(tv_app, monkeypatch):
     assert resp.data == b"abc"
     assert resp.headers["Content-Range"] == "bytes 0-2/3"
     assert c.get("/video/evil").status_code == 404
+
+
+def test_streamed_clip_is_cached(tv_app, monkeypatch):
+    http = tv_app.extensions["weirdtv"]["http"]
+    calls = []
+
+    def get(url, **kw):
+        calls.append(url)
+        if url.endswith("113.mp4"):
+            return FakeResponse(206, headers={"Content-Range": "bytes 0-1/3"}, body=b"ab")
+        return FakeResponse(206, headers={"Content-Type": "video/webm", "Content-Range": "bytes 0-2/3"},
+                            body=b"abc")
+
+    monkeypatch.setattr(http, "get", get)
+    c = tv_app.test_client()
+    assert c.get("/video/wsg-111.webm", headers={"Range": "bytes=0-"}).data == b"abc"
+    resp = c.get("/video/wsg-111.webm", headers={"Range": "bytes=1-"})
+    assert resp.status_code == 206 and resp.data == b"bc"
+    assert len(calls) == 1
+    # a partial response isn't cached
+    assert c.get("/video/wsg-113.mp4", headers={"Range": "bytes=0-1"}).status_code == 206
+    assert tv_app.extensions["weirdtv"]["cache"].get("wsg-113.mp4") is None
 
 
 def test_video_download_sets_attachment(tv_app, monkeypatch):
