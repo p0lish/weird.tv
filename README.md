@@ -132,7 +132,8 @@ Downvoting a clip also skips it.
 | `e` | all effects off / on |
 
 On touch screens: tap for the next clip, swipe left/right for next/previous, swipe up/down
-to change channel.
+to change channel. The buttons in the bottom right change channel down/up, download the
+clip and open the menu.
 
 Effect settings are remembered per browser. They can also be forced with a URL parameter,
 e.g. `/?fx=none` or `/?fx=scanlines,crt` (`all` enables everything). Motion effects start
