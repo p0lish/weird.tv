@@ -29,7 +29,7 @@ const TV = (() => {
     };
     const REDUCED_MOTION = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-    let canvas, context, crtCanvas, crt, video, spare, osd, offairEl, autoplayOverlay, menu, downloadButton, vhs;
+    let canvas, context, crtCanvas, crt, video, spare, osd, offairEl, autoplayOverlay, menu, downloadButton, voteUp, voteDown, vhs;
     let testcardImage, testcardCanvas, testcardContext, tempCanvas, tempContext;
     let testcardMod = 0, pixelOffset1 = 1, pixelOffset2 = 1, blockOffset = 2;
     let drawRect = { x: 0, y: 0, w: 0, h: 0 };
@@ -486,14 +486,17 @@ const TV = (() => {
             video.src = item.src;
             video.load();
         }
-        updateDownload(item);
+        updateControls(item);
         loadTimeoutID = setTimeout(skipBroken, LOAD_TIMEOUT_MS);
     }
 
-    function updateDownload(item) {
-        downloadButton.hidden = !item;
+    // the bottom-right buttons that act on the clip on screen
+    function updateControls(item) {
+        downloadButton.hidden = voteUp.hidden = voteDown.hidden = !item;
         if (item) {
             downloadButton.href = item.src + '?download=1';
+            voteUp.setAttribute('aria-pressed', String(item.vote > 0));
+            voteDown.setAttribute('aria-pressed', String(item.vote < 0));
         }
     }
 
@@ -626,7 +629,7 @@ const TV = (() => {
         document.body.classList.toggle('offair', !!message);
         if (message) {
             clearTimeout(stallTimeoutID);
-            updateDownload(null);
+            updateControls(null);
         }
         renderVHS();
         if (!message) {
@@ -776,6 +779,7 @@ const TV = (() => {
             showOSD('VOTE FAILED');
             return;
         }
+        updateControls(item);
         showOSD(newValue > 0 ? '▲ LIKED' : newValue < 0 ? '▼ DISLIKED' : 'VOTE REMOVED');
         renderMenu();
         if (newValue < 0 && !isLive()) {
@@ -1050,6 +1054,8 @@ const TV = (() => {
         autoplayOverlay = document.querySelector('.autoplay');
         menu = document.querySelector('.menu');
         downloadButton = document.querySelector('.download-button');
+        voteUp = document.querySelector('.vote-up');
+        voteDown = document.querySelector('.vote-down');
         vhs = document.querySelector('.vhs');
 
         try {
@@ -1095,14 +1101,8 @@ const TV = (() => {
             unlockAudio();
             toggleMenu();
         });
-        document.querySelector('.channel-up').addEventListener('click', () => {
-            unlockAudio();
-            stepChannel(1);
-        });
-        document.querySelector('.channel-down').addEventListener('click', () => {
-            unlockAudio();
-            stepChannel(-1);
-        });
+        voteUp.addEventListener('click', () => vote(1));
+        voteDown.addEventListener('click', () => vote(-1));
 
         resizeCanvas();
         requestAnimationFrame(draw);
