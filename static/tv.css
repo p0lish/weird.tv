@@ -291,41 +291,53 @@ body:hover .help {
     font-size: 24px
 }
 
-.menu-button,
-.download-button {
+.controls {
     position: absolute;
     right: 16px;
     bottom: 16px;
+    display: flex;
+    gap: 8px
+}
+
+.control {
+    display: block;
+    box-sizing: border-box;
     width: 44px;
     height: 44px;
+    padding: 0;
+    border: 0;
     border-radius: 50%;
     background: rgba(0, 0, 0, .5);
     color: #fff;
     font-size: 24px;
     line-height: 44px;
+    text-align: center;
+    text-decoration: none;
     cursor: pointer;
     opacity: 0;
     transition: opacity .4s
 }
 
-body:hover .menu-button,
-.menu-button:focus-visible,
-body:hover .download-button,
-.download-button:focus-visible {
+.control svg {
+    width: 24px;
+    height: 24px;
+    margin: 10px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round
+}
+
+body:hover .control,
+.control:focus-visible {
     opacity: .8
 }
 
 @media (hover: none) {
-    .menu-button,
-    .download-button {
+    .control {
         opacity: .6
     }
-}
-
-.download-button {
-    right: 68px;
-    text-align: center;
-    text-decoration: none
 }
 
 .download-button[hidden] {

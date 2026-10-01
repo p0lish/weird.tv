@@ -1179,6 +1179,14 @@ const TV = (() => {
             unlockAudio();
             toggleMenu();
         });
+        document.querySelector('.channel-up').addEventListener('click', () => {
+            unlockAudio();
+            stepChannel(1);
+        });
+        document.querySelector('.channel-down').addEventListener('click', () => {
+            unlockAudio();
+            stepChannel(-1);
+        });
 
         resizeCanvas();
         requestAnimationFrame(draw);
