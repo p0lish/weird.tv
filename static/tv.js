@@ -26,11 +26,20 @@ const TV = (() => {
         vhs: { key: 'v', label: 'VHS' },
         noise: { key: 'z', label: 'STATIC SOUND' },
         blip: { key: 'b', label: 'CHANNEL BLIP' },
+        bw: { key: 'w', label: 'BLACK & WHITE' },
+        reception: { key: 'a', label: 'BAD RECEPTION' },
+        vhold: { key: 'y', label: 'VERTICAL HOLD' },
+        humbar: { key: 'r', label: 'HUM BAR' },
+        power: { key: 'o', label: 'POWER ON' },
     };
+    // vertical hold: chance per frame that the picture starts rolling, and how long a roll takes
+    const ROLL_CHANCE = 1 / 1200;
+    const ROLL_MS = 900;
     const REDUCED_MOTION = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
     let canvas, context, crtCanvas, crt, video, spare, osd, offairEl, autoplayOverlay, menu, downloadButton, vhs;
-    let testcardImage, testcardCanvas, testcardContext, tempCanvas, tempContext;
+    let testcardImage, testcardCanvas, testcardContext, tempCanvas, tempContext, noiseCanvas, noiseContext;
+    let rollStart = 0;
     let testcardMod = 0, pixelOffset1 = 1, pixelOffset2 = 1, blockOffset = 2;
     let drawRect = { x: 0, y: 0, w: 0, h: 0 };
     let videoLoading = true, loadTimeoutID, stallTimeoutID, osdTimeoutID, playTimeoutID, retryTimeoutID, liveSyncID;
@@ -81,7 +90,10 @@ const TV = (() => {
 
     // defaults < saved preference < ?fx=scanlines,noise (or ?fx=none) in the URL
     function loadEffects() {
-        const result = { scanlines: true, crt: true, glitch: !REDUCED_MOTION, vhs: false, noise: true, blip: true };
+        const result = {
+            scanlines: true, crt: true, glitch: !REDUCED_MOTION, vhs: false, noise: true, blip: true,
+            bw: false, reception: false, vhold: false, humbar: false, power: !REDUCED_MOTION,
+        };
         try {
             Object.assign(result, JSON.parse(storageGet(STORAGE.effects)) || {});
         } catch (e) {
@@ -101,6 +113,8 @@ const TV = (() => {
         document.body.classList.toggle('no-scanlines', !effects.scanlines);
         document.body.classList.toggle('crt-on', !!(effects.crt && crt));
         document.body.classList.toggle('vhs-on', effects.vhs);
+        document.body.classList.toggle('bw-on', effects.bw);
+        document.body.classList.toggle('humbar-on', effects.humbar);
         renderMenu();
     }
 
@@ -221,12 +235,72 @@ const TV = (() => {
         } else {
             context.fillStyle = '#000';
             context.fillRect(0, 0, canvas.width, canvas.height);
-            context.drawImage(video, drawRect.x, drawRect.y, drawRect.w, drawRect.h);
+            drawPicture(time);
         }
         if (crt && effects.crt) {
             crt.render(canvas, time / 1000);
         }
         requestAnimationFrame(draw);
+    }
+
+    // the video frame, through whatever reception problems are switched on
+    function drawPicture(time) {
+        // vertical hold: the picture rolls up one full frame, the blanking bar passing through
+        let dy = 0;
+        if (effects.vhold && !rollStart && Math.random() < ROLL_CHANCE) {
+            rollStart = time;
+        }
+        if (rollStart) {
+            const t = (time - rollStart) / ROLL_MS;
+            if (t >= 1 || !effects.vhold) {
+                rollStart = 0;
+            } else {
+                dy = Math.round(canvas.height * (1 - Math.pow(1 - t, 3)));
+            }
+        }
+        // bad reception: a ghost to the right and the odd horizontal tear
+        const dx = effects.reception && Math.random() < 0.03 ? Math.round((Math.random() - 0.5) * canvas.width * 0.03) : 0;
+        for (const y of dy ? [dy, dy - canvas.height] : [0]) {
+            context.drawImage(video, drawRect.x + dx, drawRect.y + y, drawRect.w, drawRect.h);
+            if (effects.reception) {
+                context.globalAlpha = 0.22;
+                context.drawImage(video, drawRect.x + dx + canvas.width * 0.012, drawRect.y + y, drawRect.w, drawRect.h);
+                context.globalAlpha = 1;
+            }
+        }
+        if (dy) {
+            const bar = Math.round(canvas.height * 0.05);
+            context.fillStyle = '#000';
+            context.fillRect(0, dy - bar, canvas.width, bar);
+        }
+        if (effects.reception) {
+            drawSnow(0.16);
+        }
+    }
+
+    function drawSnow(alpha) {
+        const image = noiseContext.createImageData(noiseCanvas.width, noiseCanvas.height);
+        const pixels = image.data;
+        for (let i = 0; i < pixels.length; i += 4) {
+            pixels[i] = pixels[i + 1] = pixels[i + 2] = Math.random() * 255;
+            pixels[i + 3] = 255;
+        }
+        noiseContext.putImageData(image, 0, 0);
+        context.save();
+        context.globalAlpha = alpha;
+        context.imageSmoothingEnabled = false;
+        context.drawImage(noiseCanvas, 0, 0, canvas.width, canvas.height);
+        context.restore();
+    }
+
+    // the tube warming up: a bright line that opens into the picture
+    function powerOn() {
+        if (!effects.power) {
+            return;
+        }
+        document.body.classList.remove('power-on');
+        void document.body.offsetWidth;
+        document.body.classList.add('power-on');
     }
 
     // WebGL pass that bends the picture like a CRT: curvature, colour
@@ -670,6 +744,7 @@ const TV = (() => {
         }
         channel = slug;
         storageSet(STORAGE.channel, slug);
+        powerOn();
         discardUpcoming();
         history.length = cursor + 1;
         clearInterval(liveSyncID);
@@ -1073,6 +1148,15 @@ const TV = (() => {
         tempCanvas.width = testcardCanvas.width;
         tempCanvas.height = testcardCanvas.height;
         tempContext = tempCanvas.getContext('2d');
+        noiseCanvas = document.createElement('canvas');
+        noiseCanvas.width = 160;
+        noiseCanvas.height = 90;
+        noiseContext = noiseCanvas.getContext('2d');
+        document.body.addEventListener('animationend', (event) => {
+            if (event.animationName === 'power-on') {
+                document.body.classList.remove('power-on');
+            }
+        });
         testcardImage.onload = () => testcardContext.drawImage(testcardImage, 0, 0, testcardCanvas.width, testcardCanvas.height);
 
         video = createVideo();
@@ -1113,6 +1197,7 @@ const TV = (() => {
         channel = !initial && channels.some((c) => c.slug === saved && allowed(c)) ? saved
             : (channels.find((c) => !c.live) || channels[0]).slug;
         applyEffects();
+        powerOn();
         heartbeat();
         setInterval(heartbeat, HEARTBEAT_MS);
 
